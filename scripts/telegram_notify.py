@@ -193,22 +193,34 @@ async def safe_reply(update: Update, text: str):
         log(f"Reply failed: {e}")
 
 def schedule_uploads():
+    from main_pipeline import run_pipeline_upload_specific  # import here to avoid circular issues
+
     def loop():
         last_sent = ""
         while True:
             now = datetime.now().strftime("%H:%M")
             if now != last_sent:
-                for hour, cmd in {"10:00": "/upload 1", "16:00": "/upload 2", "21:00": "/upload 4"}.items():
+                for hour, story_num in {"10:00": 1, "16:00": 2, "21:00": 4}.items():
                     if now == hour:
-                        send_telegram_log(f"⏰ Auto upload trigger: {cmd}")
-                        requests.post(
-                            f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendMessage",
-                            data={"chat_id": os.getenv("TELEGRAM_CHAT_ID"), "text": cmd}
-                        )
+                        send_telegram_log(f"⏰ Auto upload trigger: story_{story_num}.json")
+
+                        def run():
+                            global is_running
+                            is_running = True
+                            try:
+                                run_pipeline_upload_specific(story_num)
+                            except Exception as e:
+                                log(f"[AutoUpload] Error uploading story {story_num}: {e}")
+                            finally:
+                                is_running = False
+                                clear_progress_state()
+
+                        Thread(target=run, daemon=True).start()
                 last_sent = now
             time.sleep(30)
 
     Thread(target=loop, daemon=True).start()
+
 
 def load_pipeline():
     from main_pipeline import run_pipeline, run_pipeline_upload_specific, get_upload_status, active_flags
