@@ -1,11 +1,10 @@
 import os
 import pickle
+from pathlib import Path
+from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from google_auth_oauthlib.flow import InstalledAppFlow
-from pathlib import Path
-
-
 
 def generate_title_and_description(story):
     base_title = story["title"].strip()[:100]
@@ -31,8 +30,10 @@ def generate_title_and_description(story):
     return title, description[:4900], tags
 
 def authenticate_youtube():
-    SCOPES = ["https://www.googleapis.com/auth/youtube.upload",
-              "https://www.googleapis.com/auth/youtube.readonly"]
+    SCOPES = [
+        "https://www.googleapis.com/auth/youtube.upload",
+        "https://www.googleapis.com/auth/youtube.readonly"
+    ]
     creds = None
     token_path = "token.pickle"
     client_secret = Path(os.getenv("YOUTUBE_CLIENT_SECRET", "client_secret.json")).resolve()
@@ -40,17 +41,31 @@ def authenticate_youtube():
     if not os.path.exists(client_secret):
         raise FileNotFoundError(f"client_secret.json not found at {client_secret}")
 
+    # Load credentials if token exists
     if os.path.exists(token_path):
         with open(token_path, "rb") as token:
             creds = pickle.load(token)
-    else:
+
+    # Refresh token if expired
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            with open(token_path, "wb") as token:
+                pickle.dump(creds, token)
+            print("🔁 Token refreshed and saved.")
+        except Exception as e:
+            print(f"[ERROR] Token refresh failed: {e}")
+            creds = None
+
+    # If no creds or refresh failed, authenticate again
+    if not creds or not creds.valid:
         flow = InstalledAppFlow.from_client_secrets_file(client_secret, SCOPES)
         creds = flow.run_local_server(port=0)
         with open(token_path, "wb") as token:
             pickle.dump(creds, token)
+        print("🆕 New token generated and saved.")
 
     return build("youtube", "v3", credentials=creds)
-
 
 def upload_video(file_path, title, description, tags=None, thumbnail_path=None):
     youtube = authenticate_youtube()
@@ -60,7 +75,7 @@ def upload_video(file_path, title, description, tags=None, thumbnail_path=None):
             "title": title,
             "description": description,
             "tags": tags or [],
-            "categoryId": "22"
+            "categoryId": "22"  # "People & Blogs"
         },
         "status": {
             "privacyStatus": "public"
