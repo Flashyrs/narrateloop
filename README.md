@@ -1,154 +1,125 @@
-🎬 Reddit-to-YouTube Automation Pipeline
+# 🎬 Reddit-to-YouTube Automation Pipeline
 
-An end-to-end automated pipeline that converts Reddit stories into high-retention YouTube Videos and Shorts using AI voiceovers, dynamic subtitles, and gameplay backgrounds. Fully controllable via Telegram and designed for scale.
+An end-to-end automated pipeline that converts Reddit stories into high-retention YouTube Videos and Shorts using AI voiceovers, dynamic subtitles, and gameplay backgrounds. Fully automated. Telegram-controlled. Built for scale.
 
-🚀 What This Does
+---
 
-This system:
+## 🚀 What This Does
 
-Fetches stories from Reddit automatically
+This system automatically:
+- Extracts stories from Reddit
+- Converts text into AI-generated voiceovers
+- Generates perfectly time-aligned subtitles
+- Overlays gameplay footage as background
+- Renders YouTube Shorts or full-length videos
+- Uploads or schedules content on YouTube
+- Allows full remote control via Telegram
 
-Converts text to natural-sounding AI voiceovers
+No manual editing. No UI dependency.
 
-Generates perfectly time-aligned subtitles
+---
 
-Overlays gameplay footage as background
+## 🧠 Core Features
 
-Renders YouTube Shorts or full videos
+### 🔍 Reddit Story Extraction
+- Fetches stories from configurable subreddits
+- Filters by score, length, and post type
+- Auto-splits long stories into multiple parts
+- Stores clean, structured JSON output
 
-Uploads or schedules posting to YouTube
+### 🗣️ AI Voiceover Generation
+- Uses **Bark** for expressive text-to-speech
+- Optional fallback TTS support
+- Audio cleanup and silence trimming
 
-Is controlled remotely via Telegram commands
+### ⏱️ Accurate Timestamp Mapping
+- Uses **Whisper** word-level timestamps
+- One-to-one mapping between spoken audio and original text
+- Guarantees subtitle accuracy
+- Zero hallucinated or skipped words
 
-Zero manual editing.
+### 📝 Dynamic Subtitle Generation
+- Generates `.ass` subtitle files
+- Shorts:
+  - Single-word subtitles
+  - Center aligned
+- Videos:
+  - 2–3 word grouped subtitles
+- Highlighting and emphasis supported
+- Timing driven directly by Whisper output
 
-🧠 Core Features
-🔍 Reddit Story Extraction
+### 🎮 Gameplay Background Overlay
+- Supports random or fixed gameplay clips
+- Shorts rendered in 9:16
+- Videos rendered in 16:9
+- Video length auto-matches audio duration
 
-Fetches stories from selected subreddits
+### 📤 YouTube Upload & Scheduling
+- Uses YouTube Data API
+- Supports:
+  - Auto-upload
+  - Scheduled publishing
+  - Title, description, and tag automation
+- Separate handling for Shorts and long videos
 
-Supports filtering by score, length, and post type
+### 🤖 Telegram Bot Control
+- Start or stop pipeline remotely
+- Upload specific story index
+- Override Shorts vs Video mode
+- Progress updates and error alerts
+- No server access needed after setup
 
-Splits long stories into parts automatically
+---
 
-Stores structured data in JSON
+## 🧩 Tech Stack
 
-🗣️ AI Voiceover Generation
+- **Language:** Python  
+- **TTS:** Bark  
+- **ASR & Alignment:** Whisper (word-level timestamps)  
+- **Video Processing:** FFmpeg  
+- **APIs:** Reddit API, YouTube Data API, Telegram Bot API  
+- **Automation:** Cron / Scheduler  
+- **Subtitles:** ASS (Advanced SubStation Alpha)
 
-Uses Bark for expressive text-to-speech
+---
 
-Optional fallback to other TTS engines
+## ⚙️ Setup
 
-Audio normalization and silence trimming
-
-⏱️ Accurate Timestamp Mapping
-
-Uses Whisper word-level timestamps
-
-Maps every spoken word back to original text
-
-Guarantees subtitle sync with audio
-
-No skipped or hallucinated words
-
-📝 Dynamic Subtitle Generation
-
-Generates .ass subtitle files
-
-Shorts: single-word, center-aligned subtitles
-
-Videos: 2–3 word grouped subtitles
-
-Automatic highlighting and emphasis
-
-Timing driven directly by Whisper output
-
-🎮 Gameplay Background Overlay
-
-Supports random or fixed gameplay clips
-
-Auto crop for Shorts (9:16)
-
-Full frame for Videos (16:9)
-
-Syncs video duration to audio length
-
-📤 YouTube Upload & Scheduling
-
-Uses YouTube Data API
-
-Supports:
-
-Auto upload
-
-Scheduled publishing
-
-Title, description, tags automation
-
-Shorts and long-form handled separately
-
-🤖 Telegram Bot Control
-
-Start or stop pipeline remotely
-
-Upload specific story index
-
-Override Shorts vs Video mode
-
-Progress updates and error alerts
-
-No SSH required after setup
-
-🧩 Tech Stack
-
-Language: Python
-
-TTS: Bark
-
-ASR & Alignment: Whisper (word-level timestamps)
-
-Video Processing: FFmpeg
-
-APIs: Reddit API, YouTube Data API, Telegram Bot API
-
-Automation: Cron / Scheduler
-
-Subtitles: ASS (Advanced SubStation Alpha)
-
-
-⚙️ Setup
-1. Clone the repo
+### 1. Clone the repository
+```bash
 git clone https://github.com/yourusername/reddit-to-youtube-pipeline.git
 cd reddit-to-youtube-pipeline
-
-2. Install dependencies
+```
+### 2. Install dependencies
+```
 pip install -r requirements.txt
-
-3. Configure API keys
-
-Update config.yaml with:
+```
+### 3. Configure API keys
+```
+Update config.yaml with the following:
 
 Reddit API credentials
 
-YouTube API credentials
+YouTube Data API credentials
 
 Telegram Bot token
-
-4. Run pipeline
+```
+### 4. Run the pipeline
+```
 python main_pipeline.py
-
-📌 Telegram Commands (Examples)
+```
+###📌 Telegram Commands (Examples)
+```
 /start
 /upload 3 short
 /upload 5 video
 /status
 /stop
+```
+### 🧪 Reliability Guarantees
+Every spoken word appears in subtitles
 
-🧪 Reliability Guarantees
-
-Every word spoken exists in subtitles
-
-Subtitles appear only when audio speaks
+Subtitles only appear when audio is present
 
 Video duration always matches audio
 
@@ -156,33 +127,30 @@ No silent frames
 
 No subtitle drift
 
-If this breaks, your alignment logic is wrong.
+If this fails, your alignment logic is wrong.
 
-📈 Use Cases
-
+### 📈 Use Cases
 Reddit story YouTube channels
 
 Automated Shorts farms
 
-AI narration experiments
+AI narration pipelines
 
-Content scaling pipelines
+Content scaling systems
 
-TTS + subtitle research
+Subtitle and TTS research
 
-⚠️ Disclaimer
-
+### ⚠️ Disclaimer
 You are responsible for:
 
-Reddit content usage
+Reddit content usage compliance
 
-YouTube monetization compliance
+YouTube monetization rules
 
 Copyright and fair-use policies
 
-This tool does not bypass platform rules.
+This tool does not bypass platform restrictions.
 
-📜 License
-
+### 📜 License
 MIT License.
 Use it. Modify it. Break it. Improve it.
