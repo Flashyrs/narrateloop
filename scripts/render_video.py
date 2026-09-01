@@ -192,47 +192,71 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
     # Prepare gameplay video input (Method A or Method B)
     gameplay_input_args, temp_concat_file = prepare_gameplay_input(audio_duration, specific_clip_path=gameplay_path)
 
+    # Check if thumbnail image exists for intro display
+    thumb_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"reddit_stories/{date_str}/thumb_{story_name}.png"))
+    has_thumb = os.path.exists(thumb_path)
+
+    # Read title duration from timing JSON
+    timing_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"audio/{date_str}/voice_{story_name}_timing.json"))
+    title_end_time = 3.0
+    if os.path.exists(timing_path):
+        try:
+            with open(timing_path, "r", encoding="utf-8") as f:
+                tdata = json.load(f)
+                if isinstance(tdata, dict):
+                    title_end_time = float(tdata.get("title_end_time", 3.0))
+        except Exception:
+            pass
+
     def ffmpeg_path(path):
         return path.replace("\\", "/").replace(":", "\\:")
 
     audio_path_ffmpeg = audio_path.replace("\\", "/")
     subtitle_path_ffmpeg = ffmpeg_path(subtitle_path)
 
-    if format == "short":
-        vf_filter = (
-            f"fps=30,"
-            f"scale=1080:1920:force_original_aspect_ratio=increase,"
-            f"crop=1080:1920,"
-            f"setsar=1,"
-            f"subtitles='{subtitle_path_ffmpeg}'"
-        )
-    else:  # "video" (16:9 widescreen)
-        vf_filter = (
-            f"fps=30,"
-            f"scale=1920:1080:force_original_aspect_ratio=increase,"
-            f"crop=1920:1080,"
-            f"setsar=1,"
-            f"subtitles='{subtitle_path_ffmpeg}'"
-        )
+    w, h = (1080, 1920) if format == "short" else (1920, 1080)
 
     encoder = get_best_video_encoder()
     print(f"[DEBUG] Using video encoder: {encoder}")
+
+    extra_inputs = []
+    if has_thumb:
+        thumb_path_ffmpeg = thumb_path.replace("\\", "/")
+        extra_inputs = ["-i", thumb_path_ffmpeg]
+        fade_d = 0.4
+        fade_st = max(0.1, title_end_time - fade_d)
+        
+        filter_complex = (
+            f"[2:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},format=yuva420p,fade=t=out:st={fade_st:.2f}:d={fade_d:.2f}:alpha=1[thumb];"
+            f"[0:v]fps=30,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1[gameplay];"
+            f"[gameplay][thumb]overlay=0:0:enable='between(t,0,{title_end_time:.2f})'[v_merged];"
+            f"[v_merged]subtitles='{subtitle_path_ffmpeg}'[v_out]"
+        )
+        map_args = ["-filter_complex", filter_complex, "-map", "[v_out]", "-map", "1:a:0"]
+    else:
+        vf_filter = (
+            f"fps=30,"
+            f"scale={w}:{h}:force_original_aspect_ratio=increase,"
+            f"crop={w}:{h},"
+            f"setsar=1,"
+            f"subtitles='{subtitle_path_ffmpeg}'"
+        )
+        map_args = ["-vf", vf_filter, "-map", "0:v:0", "-map", "1:a:0"]
 
     cmd = [
         "ffmpeg",
         "-y"
     ] + gameplay_input_args + [
-        "-i", audio_path_ffmpeg,
+        "-i", audio_path_ffmpeg
+    ] + extra_inputs + [
         "-c:v", encoder,
         "-preset", "ultrafast",
         "-crf", "24",
         "-threads", "0",
         "-c:a", "aac",
         "-b:a", "192k",
-        "-pix_fmt", "yuv420p",
-        "-map", "0:v:0",
-        "-map", "1:a:0",
-        "-vf", vf_filter,
+        "-pix_fmt", "yuv420p"
+    ] + map_args + [
         "-shortest",
         "-map_metadata", "-1",       # Strip all source metadata
         "-metadata", "title=",        # Remove container title

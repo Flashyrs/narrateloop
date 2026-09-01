@@ -35,7 +35,14 @@ def generate_subs(date_str, story_name, format="short"):
     subtitle_path = os.path.join(subtitle_dir, f"{date_str}_{story_name}_{format}.ass")
 
     with open(timing_path, "r", encoding="utf-8") as f:
-        word_timings = json.load(f)
+        timing_data = json.load(f)
+
+    if isinstance(timing_data, dict):
+        title_end_time = float(timing_data.get("title_end_time", 0.0))
+        word_timings = timing_data.get("words", [])
+    else:
+        title_end_time = 0.0
+        word_timings = timing_data
 
     with open(story_path, "r", encoding="utf-8") as f:
         story_text = json.load(f).get("text", "")
@@ -74,6 +81,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
             start = max(float(group[0]["start"]), 0.01)
             end = float(group[-1]["end"])
+
+            # Skip subtitle groups that occur during title thumbnail display
+            if start < title_end_time:
+                i += 3
+                continue
+
             start_str = seconds_to_ass_time(start)
             end_str = seconds_to_ass_time(end)
 
@@ -102,6 +115,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 text = clean_word(str(word["word"]))
 
                 if not text or end <= 0 or start < 0:
+                    continue
+
+                # Skip words that occur during title card display
+                if start < title_end_time:
                     continue
 
                 if i + 1 < len(word_timings):

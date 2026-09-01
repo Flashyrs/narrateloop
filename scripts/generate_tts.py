@@ -20,63 +20,63 @@ from scripts.telegram_notify import log
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 # ====================================================================
-# SUBREDDIT-AWARE VOICE MAPPING
+# SUBREDDIT-AWARE VOICE MAPPING (Boosted by 5-10% for high retention)
 # ====================================================================
 SUBREDDIT_VOICES = {
     # Casual, funny, thought-provoking
     "askreddit": {
         "male": "en-US-GuyNeural",
         "female": "en-US-MichelleNeural",
-        "rate": "+20%"
+        "rate": "+25%"
     },
     # Emotional, serious relationship drama
     "relationship_advice": {
         "male": "en-US-ChristopherNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+15%"
+        "rate": "+22%"
     },
     # Dramatic, fast-paced, humorous fuckups
     "tifu": {
         "male": "en-US-EricNeural",
         "female": "en-US-AriaNeural",
-        "rate": "+25%"
+        "rate": "+30%"
     },
     # Pop culture & music
     "askredditkpop": {
         "male": "en-US-EricNeural",
         "female": "en-US-AriaNeural",
-        "rate": "+20%"
+        "rate": "+25%"
     },
     # Intense drama & payback
     "nuclearrevenge": {
         "male": "en-US-ChristopherNeural",
         "female": "en-US-AriaNeural",
-        "rate": "+15%"
+        "rate": "+22%"
     },
     # Moral conflicts & disputes
     "amitheasshole": {
         "male": "en-US-GuyNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+15%"
+        "rate": "+22%"
     },
     # Intimate, reflective confessions
     "confessions": {
         "male": "en-US-RogerNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+15%"
+        "rate": "+22%"
     },
     # Raw feelings & unfiltered stories
     "trueoffmychest": {
         "male": "en-US-ChristopherNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+15%"
+        "rate": "+22%"
     }
 }
 
 DEFAULT_VOICE = {
     "male": "en-US-ChristopherNeural",
     "female": "en-US-JennyNeural",
-    "rate": "+15%"
+    "rate": "+22%"
 }
 
 
@@ -90,7 +90,7 @@ def get_voice_for_subreddit(subreddit, gender):
 
     # Subreddit voice
     voice = config.get(gender, DEFAULT_VOICE[gender])
-    rate = config.get("rate", "+15%")
+    rate = config.get("rate", "+22%")
 
     # Optional manual override via .env if specified
     if gender == "male" and os.getenv("EDGE_VOICE_MALE"):
@@ -128,7 +128,7 @@ def clean_text_for_tts(text):
 # MICROSOFT EDGE-TTS GENERATION WITH WORD-LEVEL TIMESTAMPS
 # ====================================================================
 
-async def _tts_edge_async(text, out_wav_path, timing_json_path, voice_name, rate):
+async def _tts_edge_async(text, out_wav_path, timing_json_path, voice_name, rate, clean_title=""):
     comm = edge_tts.Communicate(text, voice=voice_name, rate=rate, boundary="WordBoundary")
     audio_buffer = bytearray()
     words = []
@@ -147,9 +147,24 @@ async def _tts_edge_async(text, out_wav_path, timing_json_path, voice_name, rate
     seg = AudioSegment.from_file(io.BytesIO(audio_buffer), format="mp3")
     seg.export(out_wav_path, format="wav")
 
-    # Save word-level timestamps for animated subtitles
+    # Calculate exact timestamp when title finishes speaking
+    title_words = clean_title.split() if clean_title else []
+    title_word_count = len(title_words)
+    title_end_time = 0.0
+    if title_word_count > 0 and len(words) >= title_word_count:
+        title_end_time = words[title_word_count - 1]["end"] + 0.15
+    elif words:
+        title_end_time = min(3.0, words[-1]["end"])
+
+    timing_payload = {
+        "title_end_time": round(title_end_time, 3),
+        "clean_title": clean_title,
+        "words": words
+    }
+
+    # Save word-level timestamps & title metadata
     with open(timing_json_path, "w", encoding="utf-8") as f:
-        json.dump(words, f, ensure_ascii=False, indent=2)
+        json.dump(timing_payload, f, ensure_ascii=False, indent=2)
 
     return seg.duration_seconds, len(words)
 
@@ -158,6 +173,8 @@ def generate_tts(date_str, story_name):
     """
     Main TTS entrypoint:
     - Reads story JSON
+    - Cleans spoken title (strips [subreddit] and [Part X of Y])
+    - Speaks title first, then body text
     - Detects gender and selects voice based on subreddit
     - Generates voiceover and word-level timestamps in seconds
     """
@@ -176,13 +193,26 @@ def generate_tts(date_str, story_name):
     with open(story_path, "r", encoding="utf-8") as f:
         story = json.load(f)
 
-    full_text = story.get("text", "").strip().replace("\n", " ")
-    full_text = clean_text_for_tts(full_text)
+    # 1. Clean spoken title (strip [subreddit] tags so narrator only speaks the title)
+    raw_title = story.get("title", "")
+    clean_title = re.sub(r"^\[.*?\]\s*", "", raw_title)
+    clean_title = re.sub(r"\[Part \d+ of \d+\]", "", clean_title).strip()
+    clean_title = clean_text_for_tts(clean_title)
+
+    # 2. Clean body text
+    raw_body = story.get("text", "").strip().replace("\n", " ")
+    clean_body = clean_text_for_tts(raw_body)
+
+    # 3. Combine: Title spoken first, then body
+    if clean_title:
+        full_text = f"{clean_title}. {clean_body}"
+    else:
+        full_text = clean_body
 
     # Detect author gender
     voice_gender = story.get("voice")
     if voice_gender not in ["male", "female"]:
-        combined_text = story.get("title", "") + " " + story.get("text", "")
+        combined_text = clean_title + " " + clean_body
         voice_gender = detect_gender(combined_text)
         story["voice"] = voice_gender
         with open(story_path, "w", encoding="utf-8") as f:
@@ -200,10 +230,11 @@ def generate_tts(date_str, story_name):
     log(f"🎙️ [Story {story_name}] Subreddit: r/{subreddit} | Gender: {voice_gender} ➔ Voice: {voice_name} (rate: {rate})", telegram=True)
 
     start_t = time.time()
-    duration, word_count = asyncio.run(_tts_edge_async(full_text, out_path, timing_path, voice_name, rate))
+    duration, word_count = asyncio.run(_tts_edge_async(full_text, out_path, timing_path, voice_name, rate, clean_title=clean_title))
     elapsed = time.time() - start_t
 
     log(f"✅ [Story {story_name}] Voiceover generated: {duration:.1f}s audio ({word_count} words) in {elapsed:.2f}s!", telegram=True)
+    return out_path
     return out_path
 
 
