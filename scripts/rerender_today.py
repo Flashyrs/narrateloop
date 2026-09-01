@@ -1,10 +1,13 @@
 import os
 import sys
 import json
-from utils.thumbnail_utils import create_reddit_thumbnail
-from scripts.render_video import render_video
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from utils.thumbnail_utils import create_reddit_thumbnail
+from scripts.render_video import render_video
 
 def rerender(date_str="20260901"):
     print(f"🔄 Re-generating transparent cards and videos for {date_str}...")
