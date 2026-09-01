@@ -22,15 +22,12 @@ load_dotenv()
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 SUBREDDITS = [
-     "AskReddit", 
+    "relationship_advice",
     "TrueOffMyChest",
-      "relationship_advice",
-     "Karen", 
     "TIFU",
-    "NuclearRevenge", "AmITheAsshole", "confessions"
-    "AskRedditKpop"
-    # "bangtan",
-    # "bts7"
+    "AmITheAsshole",
+    "confessions",
+    "AskReddit"
 ]
 
 CENSOR_WORDS = ["fuck", "shit", "bitch", "asshole", "dick", "bastard", "crap", "cunt", "fag", "nigger"]
