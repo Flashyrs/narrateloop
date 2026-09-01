@@ -97,49 +97,63 @@ def fetch_reddit_posts():
 
     # Method 1.5: Direct Reddit OAuth API Fallback (for Cloud Datacenter IPs)
     if not posts_collected and client_id and client_secret:
-        try:
-            print("🔑 Trying direct Reddit OAuth bearer token...")
-            auth = requests.auth.HTTPBasicAuth(client_id, client_secret)
-            token_resp = requests.post(
-                "https://www.reddit.com/api/v1/access_token",
-                auth=auth,
-                data={"grant_type": "client_credentials"},
-                headers={"User-Agent": user_agent},
-                timeout=10
-            )
-            if token_resp.status_code == 200:
-                access_token = token_resp.json().get("access_token")
-                oauth_headers = {
-                    "Authorization": f"Bearer {access_token}",
-                    "User-Agent": user_agent
-                }
-                for subreddit_name in SUBREDDITS:
-                    url = f"https://oauth.reddit.com/r/{subreddit_name}/top.json?limit=20&t=day&raw_json=1"
-                    try:
-                        res = requests.get(url, headers=oauth_headers, timeout=10)
-                        if res.status_code == 200:
-                            data_children = res.json().get("data", {}).get("children", [])
-                            for child in data_children:
-                                pdata = child.get("data", {})
-                                selftext = pdata.get("selftext", "")
-                                score = pdata.get("score", 0)
-                                if not selftext or len(selftext) < 100 or score < 50:
-                                    continue
-                                posts_collected.append({
-                                    "title": censor(pdata.get("title", "").strip()),
-                                    "text": censor(selftext.strip()),
-                                    "score": score,
-                                    "subreddit": subreddit_name,
-                                    "permalink": pdata.get("permalink", "")
-                                })
-                        else:
-                            print(f"⚠️ Direct OAuth r/{subreddit_name} returned {res.status_code}")
-                    except Exception as sub_e:
-                        print(f"⚠️ Direct OAuth fetch failed for r/{subreddit_name}: {sub_e}")
-            else:
-                print(f"⚠️ Access token request returned {token_resp.status_code}: {token_resp.text[:100]}")
-        except Exception as oauth_e:
-            print(f"⚠️ Direct OAuth token request failed: {oauth_e}")
+        proxies_list = [None, {"http": "socks5h://127.0.0.1:40000", "https": "socks5h://127.0.0.1:40000"}]
+        for proxies in proxies_list:
+            if posts_collected:
+                break
+            try:
+                auth = requests.auth.HTTPBasicAuth(client_id, client_secret)
+                token_data = {"grant_type": "client_credentials"}
+                username = os.getenv("REDDIT_USERNAME")
+                password = os.getenv("REDDIT_PASSWORD")
+                if username and password:
+                    token_data = {
+                        "grant_type": "password",
+                        "username": username,
+                        "password": password
+                    }
+
+                token_resp = requests.post(
+                    "https://www.reddit.com/api/v1/access_token",
+                    auth=auth,
+                    data=token_data,
+                    headers={"User-Agent": user_agent},
+                    proxies=proxies,
+                    timeout=10
+                )
+                if token_resp.status_code == 200:
+                    access_token = token_resp.json().get("access_token")
+                    oauth_headers = {
+                        "Authorization": f"Bearer {access_token}",
+                        "User-Agent": user_agent
+                    }
+                    for subreddit_name in SUBREDDITS:
+                        url = f"https://oauth.reddit.com/r/{subreddit_name}/top.json?limit=20&t=day&raw_json=1"
+                        try:
+                            res = requests.get(url, headers=oauth_headers, proxies=proxies, timeout=10)
+                            if res.status_code == 200:
+                                data_children = res.json().get("data", {}).get("children", [])
+                                for child in data_children:
+                                    pdata = child.get("data", {})
+                                    selftext = pdata.get("selftext", "")
+                                    score = pdata.get("score", 0)
+                                    if not selftext or len(selftext) < 100 or score < 50:
+                                        continue
+                                    posts_collected.append({
+                                        "title": censor(pdata.get("title", "").strip()),
+                                        "text": censor(selftext.strip()),
+                                        "score": score,
+                                        "subreddit": subreddit_name,
+                                        "permalink": pdata.get("permalink", "")
+                                    })
+                            else:
+                                print(f"⚠️ Direct OAuth r/{subreddit_name} returned {res.status_code}")
+                        except Exception as sub_e:
+                            print(f"⚠️ Direct OAuth fetch failed for r/{subreddit_name}: {sub_e}")
+                else:
+                    print(f"⚠️ Access token request returned {token_resp.status_code}")
+            except Exception as oauth_e:
+                pass
 
     # Method 2: Public JSON Fallback (if PRAW not configured or returned nothing)
     if not posts_collected:
