@@ -1,23 +1,40 @@
+# Sensitive credentials
 .env
-token.pickle
-changes.txt
 client_secret.json
-startup_debug.log
-test.py
-assets/gameplays/video1.mp4
+token.pickle
+*.key
+*.key.pub
+*.pem
 
-assets/gameplays/video2.mp4
-assets/gameplays/video3.mp4
-nltk_data/tokenizers/punkt.zip
+# Heavy gameplay footage
+assets/gameplays/*
+!assets/gameplays/.gitkeep
 
+# Generated output directories
+audio/
+output/
+reddit_stories/
+subtitles/
+logs/
+*.log
+
+# Python environment & cache
 __pycache__/
 *.pyc
 .venv/
 venv/
-.env
-*.log
 *.sqlite3
 *.db
+
+# Temporary & scratch files
+nltk_data/
+changes.txt
+startup_debug.log
+test.py
+requirements-cloud.txt
+
+# Editor & OS files
 .DS_Store
 .idea/
 .vscode/
+working.md

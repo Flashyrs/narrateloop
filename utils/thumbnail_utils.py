@@ -160,18 +160,25 @@ def create_fallback_thumbnail(title_text, body_text, output_path, width=1080, he
     safe_title = escape_ffmpeg_text(title_wrapped)
     safe_body = escape_ffmpeg_text(body_wrapped)
 
-    # Font paths (customize if needed)
-    Copper = r"C:\Windows\Fonts\Copperplate Gothic.ttf"
-    Tw = r"C:\Windows\Fonts\Tw Cen MT.ttf"
+    # Font paths with fallback
+    def get_font_path(primary_name, fallback_name="arial.ttf"):
+        p = os.path.join(r"C:\Windows\Fonts", primary_name)
+        if os.path.exists(p):
+            return p.replace("\\", "/")
+        fb = os.path.join(r"C:\Windows\Fonts", fallback_name)
+        return fb.replace("\\", "/") if os.path.exists(fb) else primary_name
+
+    title_font = get_font_path("impact.ttf", "arialbd.ttf")
+    body_font = get_font_path("arial.ttf", "calibri.ttf")
 
     # Build FFmpeg filter text
     filter_text = (
         f"color=white@1.0:s={width}x{height},"
         f"drawbox=color=orange@1.0:x=0:y=0:w=iw:h=ih:t=40,"
-        f"drawtext=fontfile='{Copper}':text='{safe_title}':"
+        f"drawtext=fontfile='{title_font}':text='{safe_title}':"
         f"fontcolor=black:fontsize=64:x=(w-text_w)/2:y=100:"
         f"box=1:boxcolor=white@0.85:boxborderw=30:line_spacing=10,"
-        f"drawtext=fontfile='{Tw}':text='{safe_body}':"
+        f"drawtext=fontfile='{body_font}':text='{safe_body}':"
         f"fontcolor=black:fontsize=42:x=100:y=400:"
         f"box=1:boxcolor=white@0.75:boxborderw=20:line_spacing=8"
     )

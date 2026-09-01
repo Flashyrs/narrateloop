@@ -29,8 +29,8 @@ def upload_pending_video():
         with open(story_path, "r", encoding="utf-8") as f:
             story = json.load(f)
 
-        title, description = generate_title_and_description(story)
-        url = upload_video(video_path, title, description)
+        title, description, tags = generate_title_and_description(story)
+        url = upload_video(video_path, title, description, tags=tags)
         with open(uploaded_log, "a") as f:
             f.write(video_file + "\n")
         return f"Uploaded {video_file}\n{url}"

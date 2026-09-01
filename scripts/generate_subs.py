@@ -44,16 +44,21 @@ def generate_subs(date_str, story_name, format="short"):
     max_duration = 0.4
     safety_margin = 0.01
 
-    ass_content = """[Script Info]
+    if format == "short":
+        play_x, play_y, font_size = 1080, 1920, 110
+    else:
+        play_x, play_y, font_size = 1920, 1080, 70
+
+    ass_content = f"""[Script Info]
 ScriptType: v4.00+
-PlayResX: 1920
-PlayResY: 1080
+PlayResX: {play_x}
+PlayResY: {play_y}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, BackColour, OutlineColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: BoldCenter, Impact, 120, &H00FFFFFF, &H64000000, &H00000000, -1, 0, 0, 0, 100, 100, 0, 0, 1, 4, 0, 5, 0, 0, 0, 1
-Style: EmphasizedRed, Impact, 120, &H00257FFF, &H64000000, &H00000000, -1, 0, 0, 0, 100, 100, 0, 0, 1, 4, 0, 5, 0, 0, 0, 1
-Style: RhythmYellow, Impact, 120, &H00257FFF, &H64000000, &H00000000, -1, 0, 0, 0, 100, 100, 0, 0, 1, 4, 0, 5, 0, 0, 0, 1
+Style: BoldCenter, Impact, {font_size}, &H00FFFFFF, &H64000000, &H00000000, -1, 0, 0, 0, 100, 100, 0, 0, 1, 4, 0, 5, 0, 0, 0, 1
+Style: EmphasizedRed, Impact, {font_size}, &H000000FF, &H64000000, &H00000000, -1, 0, 0, 0, 100, 100, 0, 0, 1, 4, 0, 5, 0, 0, 0, 1
+Style: RhythmYellow, Impact, {font_size}, &H0000FFFF, &H64000000, &H00000000, -1, 0, 0, 0, 100, 100, 0, 0, 1, 4, 0, 5, 0, 0, 0, 1
 
 
 [Events]

@@ -11,6 +11,13 @@ import time
 from threading import Thread
 from dotenv import load_dotenv
 
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # --- Startup time tracking ---
 startup_start_time = datetime.now()
 
@@ -192,15 +199,29 @@ async def safe_reply(update: Update, text: str):
     except Exception as e:
         log(f"Reply failed: {e}")
 
+def get_upload_schedule():
+    custom_sched = os.getenv("UPLOAD_SCHEDULE")
+    if custom_sched:
+        try:
+            return {str(k).strip(): int(v) for k, v in json.loads(custom_sched).items()}
+        except Exception:
+            pass
+    custom_times = os.getenv("UPLOAD_TIMES")
+    if custom_times:
+        times = [t.strip() for t in custom_times.split(",") if t.strip()]
+        return {t: i + 1 for i, t in enumerate(times)}
+    return {"10:00": 1, "16:00": 2, "21:00": 3}
+
 def schedule_uploads():
-    from main_pipeline import run_pipeline_upload_specific  # import here to avoid circular issues
+    from main_pipeline import run_pipeline_upload_specific  
 
     def loop():
         last_sent = ""
         while True:
             now = datetime.now().strftime("%H:%M")
             if now != last_sent:
-                for hour, story_num in {"10:00": 1, "16:00": 2, "21:00": 3}.items():
+                schedule_map = get_upload_schedule()
+                for hour, story_num in schedule_map.items():
                     if now == hour:
                         send_telegram_log(f"⏰ Auto upload trigger: story_{story_num}.json")
 

@@ -1,22 +1,35 @@
 import os
+import sys
 import json
 import requests
 import re
+import praw
+from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from utils.youtube_utils import is_title_already_uploaded
 from utils.thumbnail_utils import capture_reddit_screenshot, create_fallback_thumbnail
 from utils.title_utils import generate_title_with_gemini
 
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+load_dotenv()
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 SUBREDDITS = [
-    # "AskReddit", "TrueOffMyChest",
-    #  "relationship_advice",
-    # #  "Karen", "TIFU",
+     "AskReddit", 
+     #"TrueOffMyChest",
+      "relationship_advice",
+    # #  "Karen", 
+    "TIFU",
     # "NuclearRevenge", "AmITheAsshole", "confessions"
-    "kpop",
-    "bangtan",
-    "bts7"
+    "AskRedditKpop"
+    # "bangtan",
+    # "bts7"
 ]
 
 CENSOR_WORDS = ["fuck", "shit", "bitch", "asshole", "dick", "bastard", "crap", "cunt", "fag", "nigger"]
@@ -44,35 +57,80 @@ def get_or_create_thumbnail(post_url, title_text, body_text, save_path):
         create_fallback_thumbnail(title_text, body_text, save_path)
 
 def fetch_reddit_posts():
-    headers = {'User-Agent': 'RedditYTBot/1.0'}
     posts_collected = []
 
-    for subreddit in SUBREDDITS:
-        url = f'https://www.reddit.com/r/{subreddit}/top.json?limit=10&t=day'
+    client_id = os.getenv("REDDIT_CLIENT_ID")
+    client_secret = os.getenv("REDDIT_SECRET")
+    user_agent = os.getenv("REDDIT_USER_AGENT", "RedditYTBot/1.0")
+
+    # Method 1: Official PRAW API (Fast & Block-Free)
+    if client_id and client_secret:
         try:
-            res = requests.get(url, headers=headers, timeout=10)
-            posts = res.json().get('data', {}).get('children', [])
-            for post in posts:
-                data = post["data"]
-                if not data.get("selftext") or len(data["selftext"]) < 100:
+            print("🔑 Fetching Reddit posts via authenticated PRAW API...")
+            reddit = praw.Reddit(
+                client_id=client_id,
+                client_secret=client_secret,
+                user_agent=user_agent
+            )
+            for subreddit_name in SUBREDDITS:
+                try:
+                    sub = reddit.subreddit(subreddit_name)
+                    for post in sub.top(time_filter="day", limit=15):
+                        if not post.selftext or len(post.selftext) < 100 or post.score < 100:
+                            continue
+                        posts_collected.append({
+                            "title": censor(post.title.strip()),
+                            "text": censor(post.selftext.strip()),
+                            "score": post.score,
+                            "subreddit": subreddit_name,
+                            "permalink": post.permalink
+                        })
+                except Exception as sub_e:
+                    print(f"⚠️ Failed to fetch r/{subreddit_name} via PRAW: {sub_e}")
                     continue
-                if data.get("score", 0) < 100:
-                    continue
-                posts_collected.append({
-                    "title": censor(data["title"].strip()),
-                    "text": censor(data["selftext"].strip()),
-                    "score": data.get("score", 0),
-                    "subreddit": subreddit,
-                    "permalink": data.get("permalink")
-                })
         except Exception as e:
-            print(f"⚠️ Failed to fetch from r/{subreddit}: {e}")
-            continue
+            print(f"⚠️ PRAW initialization failed: {e}")
+
+    # Method 2: Public JSON Fallback (if PRAW not configured or returned nothing)
+    if not posts_collected:
+        print("🌐 Falling back to public JSON scraping...")
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        }
+        for subreddit in SUBREDDITS:
+            url = f'https://www.reddit.com/r/{subreddit}/top.json?limit=15&t=day'
+            try:
+                res = requests.get(url, headers=headers, timeout=10)
+                if res.status_code != 200:
+                    continue
+                posts = res.json().get('data', {}).get('children', [])
+                for post in posts:
+                    data = post["data"]
+                    if not data.get("selftext") or len(data["selftext"]) < 100:
+                        continue
+                    if data.get("score", 0) < 100:
+                        continue
+                    posts_collected.append({
+                        "title": censor(data["title"].strip()),
+                        "text": censor(data["selftext"].strip()),
+                        "score": data.get("score", 0),
+                        "subreddit": subreddit,
+                        "permalink": data.get("permalink")
+                    })
+            except Exception as e:
+                print(f"⚠️ Failed to fetch from r/{subreddit}: {e}")
+                continue
 
     if not posts_collected:
         raise Exception("❌ No suitable posts found.")
 
     posts_collected.sort(key=lambda x: x["score"], reverse=True)
+
+    # Configuration toggles from environment
+    only_shorts = os.getenv("ONLY_SHORTS", "true").lower() in ("true", "1", "yes")
+    target_shorts = int(os.getenv("TARGET_SHORTS_PER_DAY", "3"))
+    target_videos = 0 if only_shorts else int(os.getenv("TARGET_VIDEOS_PER_DAY", "1"))
 
     shorts_collected = 0
     videos_collected = 0
@@ -97,10 +155,10 @@ def fetch_reddit_posts():
 
         post_url = f"https://www.reddit.com{post['permalink']}"
 
-        # ----- VIDEO STORIES -----
-        if word_count > 400:
+        # ----- LONG VIDEO STORIES (Only if not in ONLY_SHORTS mode) -----
+        if not only_shorts and word_count > 400 and videos_collected < target_videos:
             if word_count <= MAX_VIDEO_WORDS:
-                if shorts_collected >= 3 and videos_collected < 1:
+                if shorts_collected >= target_shorts:
                     # Save single-part video
                     story = {
                         "title": gemini_title,
@@ -135,7 +193,7 @@ def fetch_reddit_posts():
                         "format": "video"
                     }
 
-                    if i == 0 and shorts_collected >= 3 and videos_collected < 1:
+                    if i == 0 and shorts_collected >= target_shorts and videos_collected < target_videos:
                         story_path = os.path.join(out_dir_today, f"story_{idx_today}.json")
                         with open(story_path, "w", encoding="utf-8") as f:
                             json.dump(story, f, indent=4, ensure_ascii=False)
@@ -161,13 +219,16 @@ def fetch_reddit_posts():
                         print(f"📅 Scheduled Part {i+1} for {future_str}: {future_path}")
 
         # ----- SHORT STORIES -----
-        elif shorts_collected < 3:
+        elif shorts_collected < target_shorts:
             parts = split_story(text, MAX_SHORT_WORDS)
-            valid_parts = [p for p in parts if len(p.split()) >= MIN_SHORT_WORDS]
+            min_words = int(os.getenv("MIN_SHORT_WORDS", str(MIN_SHORT_WORDS)))
+            valid_parts = [p for p in parts if len(p.split()) >= min_words]
+            if not valid_parts and len(text.split()) >= 80:
+                valid_parts = [text]  # Accept slightly shorter stories if readable
             total_parts = len(valid_parts)
 
             for i, part in enumerate(valid_parts):
-                if shorts_collected >= 3:
+                if shorts_collected >= target_shorts:
                     break
 
                 story = {
@@ -175,7 +236,8 @@ def fetch_reddit_posts():
                     "text": part.strip(),
                     "part": i + 1,
                     "total_parts": total_parts,
-                    "format": "short"
+                    "format": "short",
+                    "subreddit": subreddit
                 }
 
                 story_path = os.path.join(out_dir_today, f"story_{idx_today}.json")
@@ -190,14 +252,13 @@ def fetch_reddit_posts():
                 shorts_collected += 1
 
         # ----- Exit condition -----
-        if shorts_collected >= 3 and videos_collected >= 1:
+        if shorts_collected >= target_shorts and videos_collected >= target_videos:
             break
 
+    if shorts_collected < target_shorts:
+        raise Exception(f"❌ Not enough short stories collected (collected {shorts_collected}/{target_shorts}).")
 
-    if shorts_collected < 3:
-        raise Exception("❌ Not enough short stories collected.")
-
-    print(f"✅ Saved {idx_today - 1} stories for {date_str_today}")
+    print(f"✅ Saved {idx_today - 1} stories for {date_str_today} (Shorts: {shorts_collected}, Videos: {videos_collected})")
     return date_str_today, idx_today - 1
 
 if __name__ == "__main__":

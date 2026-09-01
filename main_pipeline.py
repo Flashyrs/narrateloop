@@ -1,9 +1,16 @@
 import os
+import sys
 import json
-import torch
 import re
 import time
 from datetime import datetime
+
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 from scripts.telegram_notify import send_telegram_log, should_stop, get_task_flags
 from scripts.fetch_reddit import fetch_reddit_posts
 from scripts.generate_tts import generate_tts

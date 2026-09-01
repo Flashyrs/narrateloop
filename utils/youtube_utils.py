@@ -3,9 +3,18 @@ import pickle
 import re
 from pathlib import Path
 from googleapiclient.discovery import build
+from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
+from google_auth_oauthlib.flow import InstalledAppFlow
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.readonly"]
+
+SCOPES = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.readonly"
+]
+
 TOKEN_PATH = Path("token.pickle").resolve()
+CLIENT_SECRET = Path(os.getenv("YOUTUBE_CLIENT_SECRET", "client_secret.json")).resolve()
 
 _cached_titles = None
 
@@ -13,10 +22,35 @@ def strip_part_suffix(title):
     return re.sub(r"\s*\[Part \d+ of \d+\]$", "", title, flags=re.IGNORECASE).strip().lower()
 
 def get_authenticated_service():
-    if not TOKEN_PATH.exists():
-        raise FileNotFoundError(f"🔐 Token file not found: {TOKEN_PATH}")
-    with open(TOKEN_PATH, "rb") as token_file:
-        creds = pickle.load(token_file)
+    creds = None
+
+    # Load existing token
+    if TOKEN_PATH.exists():
+        with open(TOKEN_PATH, "rb") as token_file:
+            creds = pickle.load(token_file)
+
+    # Refresh token if expired
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            with open(TOKEN_PATH, "wb") as token_file:
+                pickle.dump(creds, token_file)
+            print("🔁 Token refreshed successfully.")
+        except RefreshError as e:
+            print(f"⚠️ Refresh token failed: {e}. Reauthenticating...")
+            creds = None  # Force reauth
+
+    # If no valid creds, do full auth flow
+    if not creds or not creds.valid:
+        if not CLIENT_SECRET.exists():
+            raise FileNotFoundError(f"❌ client_secret.json not found at {CLIENT_SECRET}")
+        print("🔐 Starting new OAuth flow...")
+        flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET, SCOPES)
+        creds = flow.run_local_server(port=0)
+        with open(TOKEN_PATH, "wb") as token_file:
+            pickle.dump(creds, token_file)
+        print("✅ Token saved to disk.")
+
     return build("youtube", "v3", credentials=creds)
 
 def get_recent_video_titles(max_results=200):
@@ -48,4 +82,3 @@ def is_title_already_uploaded(target_title):
         print("🔄 Fetching recent uploaded titles from YouTube...")
         _cached_titles = get_recent_video_titles()
     return strip_part_suffix(target_title) in _cached_titles
-
