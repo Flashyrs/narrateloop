@@ -224,6 +224,8 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
     ] + gameplay_input_args + [
         "-i", audio_path_ffmpeg,
         "-c:v", encoder,
+        "-preset", "veryfast",
+        "-crf", "22",
         "-c:a", "aac",
         "-b:a", "192k",
         "-pix_fmt", "yuv420p",
