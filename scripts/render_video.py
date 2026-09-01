@@ -200,18 +200,18 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
 
     if format == "short":
         vf_filter = (
+            f"fps=30,"
             f"scale=1080:1920:force_original_aspect_ratio=increase,"
             f"crop=1080:1920,"
             f"setsar=1,"
-            f"fps=30,"
             f"subtitles='{subtitle_path_ffmpeg}'"
         )
     else:  # "video" (16:9 widescreen)
         vf_filter = (
+            f"fps=30,"
             f"scale=1920:1080:force_original_aspect_ratio=increase,"
             f"crop=1920:1080,"
             f"setsar=1,"
-            f"fps=30,"
             f"subtitles='{subtitle_path_ffmpeg}'"
         )
 
@@ -224,8 +224,9 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
     ] + gameplay_input_args + [
         "-i", audio_path_ffmpeg,
         "-c:v", encoder,
-        "-preset", "veryfast",
-        "-crf", "22",
+        "-preset", "ultrafast",
+        "-crf", "24",
+        "-threads", "0",
         "-c:a", "aac",
         "-b:a", "192k",
         "-pix_fmt", "yuv420p",
