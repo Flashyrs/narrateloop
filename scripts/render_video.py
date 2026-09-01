@@ -255,7 +255,8 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
         "-threads", "0",
         "-c:a", "aac",
         "-b:a", "192k",
-        "-pix_fmt", "yuv420p"
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart"
     ] + map_args + [
         "-shortest",
         "-map_metadata", "-1",       # Strip all source metadata
