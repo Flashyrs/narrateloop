@@ -246,11 +246,8 @@ def fetch_reddit_posts():
         title_with_subreddit = f"[{subreddit}] {raw_title}"
         gemini_title = generate_title_with_gemini(text, title_with_subreddit)
 
-        if is_title_already_uploaded(gemini_title):
-            print(f"⏩ Skipping already uploaded: {gemini_title}")
-            continue
-
-        post_url = f"https://www.reddit.com{post['permalink']}"
+        raw_permalink = post.get("permalink", "")
+        post_url = raw_permalink if raw_permalink.startswith("http") else f"https://www.reddit.com{raw_permalink}"
 
         # ----- LONG VIDEO STORIES (Only if not in ONLY_SHORTS mode) -----
         if not only_shorts and word_count > 400 and videos_collected < target_videos:
