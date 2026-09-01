@@ -60,9 +60,33 @@ def censor(text):
         text = replace_word(word)
     return text
 
-def split_story(text, max_words):
-    words = text.split()
-    return [" ".join(words[i:i + max_words]) for i in range(0, len(words), max_words)]
+def trim_story_to_short(text, min_words=110, max_words=165):
+    """
+    Trims a story cleanly at a sentence boundary to fit the 45-55 second Short duration (~120-165 words).
+    Guarantees no sentence is cut off mid-word.
+    """
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    accumulated = []
+    current_word_count = 0
+
+    for s in sentences:
+        s = s.strip()
+        if not s:
+            continue
+        words_in_s = len(s.split())
+        if current_word_count + words_in_s <= max_words:
+            accumulated.append(s)
+            current_word_count += words_in_s
+        else:
+            if current_word_count >= min_words:
+                break
+            if current_word_count + words_in_s <= max_words + 20:
+                accumulated.append(s)
+                current_word_count += words_in_s
+            break
+
+    result = " ".join(accumulated).strip()
+    return result, len(result.split())
 
 def get_or_create_thumbnail(post_url, title_text, body_text, save_path, subreddit="relationship_advice", format="short"):
     create_reddit_thumbnail(
@@ -291,38 +315,31 @@ def fetch_reddit_posts():
             idx_today += 1
             videos_collected += 1
 
-        # ----- SHORT STORIES -----
+        # ----- SHORT STORIES (Each Short is 1 complete standalone story) -----
         elif shorts_collected < target_shorts:
-            parts = split_story(text, MAX_SHORT_WORDS)
-            min_words = int(os.getenv("MIN_SHORT_WORDS", str(MIN_SHORT_WORDS)))
-            valid_parts = [p for p in parts if len(p.split()) >= min_words]
-            if not valid_parts and len(text.split()) >= 80:
-                valid_parts = [text]  # Accept slightly shorter stories if readable
-            total_parts = len(valid_parts)
+            story_content, word_cnt = trim_story_to_short(text, min_words=110, max_words=165)
+            if word_cnt < 90:
+                continue
 
-            for i, part in enumerate(valid_parts):
-                if shorts_collected >= target_shorts:
-                    break
+            story = {
+                "title": gemini_title,
+                "text": story_content,
+                "part": 1,
+                "total_parts": 1,
+                "format": "short",
+                "subreddit": subreddit
+            }
 
-                story = {
-                    "title": f"{gemini_title} [Part {i+1} of {total_parts}]" if total_parts > 1 else gemini_title,
-                    "text": part.strip(),
-                    "part": i + 1,
-                    "total_parts": total_parts,
-                    "format": "short",
-                    "subreddit": subreddit
-                }
+            story_path = os.path.join(out_dir_today, f"story_{idx_today}.json")
+            with open(story_path, "w", encoding="utf-8") as f:
+                json.dump(story, f, indent=4, ensure_ascii=False)
 
-                story_path = os.path.join(out_dir_today, f"story_{idx_today}.json")
-                with open(story_path, "w", encoding="utf-8") as f:
-                    json.dump(story, f, indent=4, ensure_ascii=False)
+            screenshot_path = os.path.join(out_dir_today, f"thumb_{idx_today}.png")
+            get_or_create_thumbnail(post_url, gemini_title, story_content, screenshot_path, subreddit=subreddit, format="short")
 
-                screenshot_path = os.path.join(out_dir_today, f"thumb_{idx_today}.png")
-                get_or_create_thumbnail(post_url, gemini_title, part.strip(), screenshot_path, subreddit=subreddit, format="short")
-
-                print(f"🎯 Saved short story: {story_path}")
-                idx_today += 1
-                shorts_collected += 1
+            print(f"🎯 Saved short story ({word_cnt} words, ~{round(word_cnt/175*60)}s): {story_path}")
+            idx_today += 1
+            shorts_collected += 1
 
         # ----- Exit condition -----
         if shorts_collected >= target_shorts and videos_collected >= target_videos:
