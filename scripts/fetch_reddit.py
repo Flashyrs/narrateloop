@@ -64,11 +64,18 @@ def fetch_reddit_posts():
     if client_id and client_secret:
         try:
             print("🔑 Fetching Reddit posts via authenticated PRAW API...")
-            reddit = praw.Reddit(
-                client_id=client_id,
-                client_secret=client_secret,
-                user_agent=user_agent
-            )
+            praw_kwargs = {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "user_agent": user_agent
+            }
+            username = os.getenv("REDDIT_USERNAME")
+            password = os.getenv("REDDIT_PASSWORD")
+            if username and password:
+                praw_kwargs["username"] = username
+                praw_kwargs["password"] = password
+
+            reddit = praw.Reddit(**praw_kwargs)
             for subreddit_name in SUBREDDITS:
                 try:
                     sub = reddit.subreddit(subreddit_name)
