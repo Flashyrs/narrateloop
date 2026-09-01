@@ -21,15 +21,12 @@ load_dotenv()
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 SUBREDDITS = [
-     "AskReddit", 
-     #"TrueOffMyChest",
-      "relationship_advice",
-    # #  "Karen", 
+    "relationship_advice",
+    "TrueOffMyChest",
     "TIFU",
-    # "NuclearRevenge", "AmITheAsshole", "confessions"
-    "AskRedditKpop"
-    # "bangtan",
-    # "bts7"
+    "AmITheAsshole",
+    "confessions",
+    "AskReddit"
 ]
 
 CENSOR_WORDS = ["fuck", "shit", "bitch", "asshole", "dick", "bastard", "crap", "cunt", "fag", "nigger"]
@@ -75,8 +72,8 @@ def fetch_reddit_posts():
             for subreddit_name in SUBREDDITS:
                 try:
                     sub = reddit.subreddit(subreddit_name)
-                    for post in sub.top(time_filter="day", limit=15):
-                        if not post.selftext or len(post.selftext) < 100 or post.score < 100:
+                    for post in sub.top(time_filter="day", limit=20):
+                        if not post.selftext or len(post.selftext) < 100 or post.score < 50:
                             continue
                         posts_collected.append({
                             "title": censor(post.title.strip()),
@@ -106,11 +103,11 @@ def fetch_reddit_posts():
             if token_resp.status_code == 200:
                 access_token = token_resp.json().get("access_token")
                 oauth_headers = {
-                    "Authorization": f"bearer {access_token}",
+                    "Authorization": f"Bearer {access_token}",
                     "User-Agent": user_agent
                 }
                 for subreddit_name in SUBREDDITS:
-                    url = f"https://oauth.reddit.com/r/{subreddit_name}/top?limit=15&t=day"
+                    url = f"https://oauth.reddit.com/r/{subreddit_name}/top.json?limit=20&t=day&raw_json=1"
                     try:
                         res = requests.get(url, headers=oauth_headers, timeout=10)
                         if res.status_code == 200:
@@ -119,7 +116,7 @@ def fetch_reddit_posts():
                                 pdata = child.get("data", {})
                                 selftext = pdata.get("selftext", "")
                                 score = pdata.get("score", 0)
-                                if not selftext or len(selftext) < 100 or score < 100:
+                                if not selftext or len(selftext) < 100 or score < 50:
                                     continue
                                 posts_collected.append({
                                     "title": censor(pdata.get("title", "").strip()),
@@ -128,8 +125,12 @@ def fetch_reddit_posts():
                                     "subreddit": subreddit_name,
                                     "permalink": pdata.get("permalink", "")
                                 })
+                        else:
+                            print(f"⚠️ Direct OAuth r/{subreddit_name} returned {res.status_code}")
                     except Exception as sub_e:
                         print(f"⚠️ Direct OAuth fetch failed for r/{subreddit_name}: {sub_e}")
+            else:
+                print(f"⚠️ Access token request returned {token_resp.status_code}: {token_resp.text[:100]}")
         except Exception as oauth_e:
             print(f"⚠️ Direct OAuth token request failed: {oauth_e}")
 
