@@ -3,6 +3,7 @@ import sys
 import json
 import requests
 import re
+import html
 import praw
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
@@ -155,7 +156,39 @@ def fetch_reddit_posts():
             except Exception as oauth_e:
                 pass
 
-    # Method 2: Public JSON Fallback (if PRAW not configured or returned nothing)
+    # Method 2: High-Speed RSS2JSON Fallback (100% Reliable on Cloud Servers)
+    if not posts_collected:
+        print("🌐 Fetching top stories via RSS2JSON feed parser...")
+        for subreddit in SUBREDDITS:
+            try:
+                rss_url = f"https://www.reddit.com/r/{subreddit}/top/.rss?t=day"
+                api_url = f"https://api.rss2json.com/v1/api.json?rss_url={requests.utils.quote(rss_url)}"
+                res = requests.get(api_url, timeout=10)
+                if res.status_code == 200:
+                    feed_data = res.json()
+                    for item in feed_data.get("items", []):
+                        raw_desc = item.get("description", "") or item.get("content", "")
+                        # Remove HTML markup and unescape HTML entities
+                        clean_text = re.sub(r"<[^>]+>", " ", raw_desc)
+                        clean_text = re.sub(r"submitted by\s+.*?to\s+r/\w+", "", clean_text, flags=re.IGNORECASE)
+                        clean_text = re.sub(r"\[link\]\s+\[comments\]", "", clean_text, flags=re.IGNORECASE)
+                        clean_text = html.unescape(clean_text).strip()
+                        clean_text = re.sub(r"\s+", " ", clean_text)
+
+                        if not clean_text or len(clean_text) < 100:
+                            continue
+
+                        posts_collected.append({
+                            "title": censor(item.get("title", "").strip()),
+                            "text": censor(clean_text),
+                            "score": 500,  # Top daily posts
+                            "subreddit": subreddit,
+                            "permalink": item.get("link", "")
+                        })
+            except Exception as rss_e:
+                print(f"⚠️ RSS2JSON fetch failed for r/{subreddit}: {rss_e}")
+
+    # Method 3: Public JSON Fallback (if PRAW and RSS not available)
     if not posts_collected:
         print("🌐 Falling back to public JSON scraping...")
         headers = {
@@ -173,7 +206,7 @@ def fetch_reddit_posts():
                     data = post["data"]
                     if not data.get("selftext") or len(data["selftext"]) < 100:
                         continue
-                    if data.get("score", 0) < 100:
+                    if data.get("score", 0) < 50:
                         continue
                     posts_collected.append({
                         "title": censor(data["title"].strip()),
