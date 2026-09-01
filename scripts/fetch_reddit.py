@@ -61,7 +61,7 @@ def fetch_reddit_posts():
 
     client_id = os.getenv("REDDIT_CLIENT_ID")
     client_secret = os.getenv("REDDIT_SECRET")
-    user_agent = os.getenv("REDDIT_USER_AGENT", "RedditYTBot/1.0")
+    user_agent = os.getenv("REDDIT_USER_AGENT", "android:com.narrateloop.shorts:v1.0 (by /u/Flashyrs)")
 
     # Method 1: Official PRAW API (Fast & Block-Free)
     if client_id and client_secret:
@@ -90,6 +90,48 @@ def fetch_reddit_posts():
                     continue
         except Exception as e:
             print(f"⚠️ PRAW initialization failed: {e}")
+
+    # Method 1.5: Direct Reddit OAuth API Fallback (for Cloud Datacenter IPs)
+    if not posts_collected and client_id and client_secret:
+        try:
+            print("🔑 Trying direct Reddit OAuth bearer token...")
+            auth = requests.auth.HTTPBasicAuth(client_id, client_secret)
+            token_resp = requests.post(
+                "https://www.reddit.com/api/v1/access_token",
+                auth=auth,
+                data={"grant_type": "client_credentials"},
+                headers={"User-Agent": user_agent},
+                timeout=10
+            )
+            if token_resp.status_code == 200:
+                access_token = token_resp.json().get("access_token")
+                oauth_headers = {
+                    "Authorization": f"bearer {access_token}",
+                    "User-Agent": user_agent
+                }
+                for subreddit_name in SUBREDDITS:
+                    url = f"https://oauth.reddit.com/r/{subreddit_name}/top?limit=15&t=day"
+                    try:
+                        res = requests.get(url, headers=oauth_headers, timeout=10)
+                        if res.status_code == 200:
+                            data_children = res.json().get("data", {}).get("children", [])
+                            for child in data_children:
+                                pdata = child.get("data", {})
+                                selftext = pdata.get("selftext", "")
+                                score = pdata.get("score", 0)
+                                if not selftext or len(selftext) < 100 or score < 100:
+                                    continue
+                                posts_collected.append({
+                                    "title": censor(pdata.get("title", "").strip()),
+                                    "text": censor(selftext.strip()),
+                                    "score": score,
+                                    "subreddit": subreddit_name,
+                                    "permalink": pdata.get("permalink", "")
+                                })
+                    except Exception as sub_e:
+                        print(f"⚠️ Direct OAuth fetch failed for r/{subreddit_name}: {sub_e}")
+        except Exception as oauth_e:
+            print(f"⚠️ Direct OAuth token request failed: {oauth_e}")
 
     # Method 2: Public JSON Fallback (if PRAW not configured or returned nothing)
     if not posts_collected:
