@@ -101,7 +101,7 @@ def prepare_gameplay_input(audio_duration, specific_clip_path=None):
             max_start = max(0.0, clip_dur - target_duration)
             start_offset = random.uniform(0.0, max_start)
             print(f"[DEBUG] [Method A - Offset] Chosen clip: {os.path.basename(candidate_clip)} (Length: {clip_dur:.1f}s) starting at random offset: {start_offset:.1f}s")
-            return ["-ss", f"{start_offset:.2f}", "-i", candidate_clip.replace("\\", "/")], None
+            return ["-ss", f"{start_offset:.2f}", "-avoid_negative_ts", "make_zero", "-i", candidate_clip.replace("\\", "/")], None
 
     # ----------------------------------------------------
     # METHOD B: Dynamic Random Montage (or Fallback if clip too short)
