@@ -293,6 +293,7 @@ def capture_reddit_screenshot_card(reddit_url, temp_save_path):
     Returns the PIL Image if successful, None otherwise.
     """
     try:
+        from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(
