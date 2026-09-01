@@ -298,8 +298,8 @@ def get_upload_status(date_str=None):
 
 
 if __name__ == "__main__":
-    print(torch.__version__)
-    print(torch.cuda.is_available())
+    upload_flag = "--upload" in sys.argv
+    run_pipeline(upload=upload_flag)
 
 
 
