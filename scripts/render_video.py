@@ -192,9 +192,15 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
     # Prepare gameplay video input (Method A or Method B)
     gameplay_input_args, temp_concat_file = prepare_gameplay_input(audio_duration, specific_clip_path=gameplay_path)
 
-    # Check if thumbnail image exists for intro display
+    # Check if transparent card overlay exists for live gameplay video intro
+    card_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"reddit_stories/{date_str}/card_{story_name}.png"))
     thumb_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"reddit_stories/{date_str}/thumb_{story_name}.png"))
-    has_thumb = os.path.exists(thumb_path)
+    
+    overlay_img_path = None
+    if os.path.exists(card_path):
+        overlay_img_path = card_path
+    elif os.path.exists(thumb_path):
+        overlay_img_path = thumb_path
 
     # Read title duration from timing JSON
     timing_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"audio/{date_str}/voice_{story_name}_timing.json"))
@@ -220,16 +226,16 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
     print(f"[DEBUG] Using video encoder: {encoder}")
 
     extra_inputs = []
-    if has_thumb:
-        thumb_path_ffmpeg = thumb_path.replace("\\", "/")
-        extra_inputs = ["-i", thumb_path_ffmpeg]
+    if overlay_img_path:
+        overlay_path_ffmpeg = overlay_img_path.replace("\\", "/")
+        extra_inputs = ["-i", overlay_path_ffmpeg]
         fade_d = 0.4
         fade_st = max(0.1, title_end_time - fade_d)
         
         filter_complex = (
-            f"[2:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},format=yuva420p,fade=t=out:st={fade_st:.2f}:d={fade_d:.2f}:alpha=1[thumb];"
+            f"[2:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},format=yuva420p,fade=t=out:st={fade_st:.2f}:d={fade_d:.2f}:alpha=1[card];"
             f"[0:v]fps=30,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1[gameplay];"
-            f"[gameplay][thumb]overlay=0:0:enable='between(t,0,{title_end_time:.2f})'[v_merged];"
+            f"[gameplay][card]overlay=0:0:enable='between(t,0,{title_end_time:.2f})'[v_merged];"
             f"[v_merged]subtitles='{subtitle_path_ffmpeg}'[v_out]"
         )
         map_args = ["-filter_complex", filter_complex, "-map", "[v_out]", "-map", "1:a:0"]

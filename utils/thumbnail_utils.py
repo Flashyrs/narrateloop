@@ -340,18 +340,47 @@ def capture_reddit_screenshot_card(reddit_url, temp_save_path):
     return None
 
 
+def create_transparent_card_overlay(card_img, canvas_w=1080, canvas_h=1920, format="short"):
+    """
+    Places the Reddit Card with soft Gaussian drop-shadow onto an empty transparent canvas (1080x1920).
+    This transparent image is overlaid onto the LIVE moving gameplay video in FFmpeg!
+    """
+    card_w, card_h = card_img.size
+    canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+
+    # Soft drop shadow
+    shadow_margin = 30
+    shadow = Image.new("RGBA", (card_w + shadow_margin * 2, card_h + shadow_margin * 2), (0, 0, 0, 0))
+    s_draw = ImageDraw.Draw(shadow)
+    s_draw.rounded_rectangle(
+        [shadow_margin, shadow_margin, card_w + shadow_margin, card_h + shadow_margin],
+        radius=24,
+        fill=(0, 0, 0, 190)
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(16))
+
+    card_x = (canvas_w - card_w) // 2
+    card_y = int(canvas_h * 0.22) if format == "short" else int(canvas_h * 0.16)
+
+    canvas.paste(shadow, (card_x - shadow_margin, card_y - shadow_margin + 6), shadow)
+    canvas.paste(card_img, (card_x, card_y), card_img)
+    return canvas
+
+
 def create_reddit_thumbnail(title_text, subreddit="relationship_advice", body_text="", output_path="thumb.png", format="short", gameplay_path=None, post_url=None):
     """
     Master thumbnail generator:
-    1. Extracts a random snippet frame from the selected gameplay video as the background.
+    1. Extracts a random snippet frame from the selected gameplay video as the background for the YouTube thumbnail image.
     2. Overlays the Reddit post card (either Playwright screenshot or realistic Reddit UI card)
-       in the foreground (occupying ~85% width, never the full viewport).
-    3. Saves the final composite image.
+       in the foreground.
+    3. Saves both:
+       - thumb_{idx}.png (Full composite for YouTube thumbnail upload)
+       - card_{idx}.png (1080x1920 transparent card for live moving gameplay video intro overlay)
     """
     w, h = (1080, 1920) if format == "short" else (1920, 1080)
     card_w = int(w * 0.86)
 
-    # 1. Background gameplay video snippet frame
+    # 1. Background gameplay video snippet frame (for YouTube thumbnail)
     bg_img = extract_gameplay_frame(gameplay_path=gameplay_path, width=w, height=h)
 
     # 2. Foreground Reddit Card
@@ -375,7 +404,15 @@ def create_reddit_thumbnail(title_text, subreddit="relationship_advice", body_te
     if card_img is None:
         card_img = render_reddit_card_pil(title_text, subreddit, body_text=body_text, card_width=card_w)
 
-    # 3. Composite card in foreground over gameplay background
+    # 3. Save transparent card overlay (used over live video gameplay during title intro)
+    card_overlay_path = output_path.replace("thumb_", "card_")
+    if card_overlay_path != output_path:
+        card_canvas = create_transparent_card_overlay(card_img, canvas_w=w, canvas_h=h, format=format)
+        os.makedirs(os.path.dirname(os.path.abspath(card_overlay_path)), exist_ok=True)
+        card_canvas.save(card_overlay_path, "PNG")
+        print(f"✅ Transparent card overlay saved: {card_overlay_path}")
+
+    # 4. Composite card in foreground over static gameplay background (for YouTube thumbnail)
     return composite_card_over_background(card_img, bg_img, output_path, format=format)
 
 
