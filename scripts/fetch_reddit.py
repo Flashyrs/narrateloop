@@ -8,7 +8,7 @@ import praw
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from utils.youtube_utils import is_title_already_uploaded
-from utils.thumbnail_utils import capture_reddit_screenshot, create_fallback_thumbnail
+from utils.thumbnail_utils import create_reddit_thumbnail
 from utils.title_utils import generate_title_with_gemini
 
 if sys.platform == "win32":
@@ -64,11 +64,15 @@ def split_story(text, max_words):
     words = text.split()
     return [" ".join(words[i:i + max_words]) for i in range(0, len(words), max_words)]
 
-def get_or_create_thumbnail(post_url, title_text, body_text, save_path):
-    success = capture_reddit_screenshot(post_url, save_path)
-    if not success:
-        print("⚠️ Screenshot failed — creating fallback thumbnail.")
-        create_fallback_thumbnail(title_text, body_text, save_path)
+def get_or_create_thumbnail(post_url, title_text, body_text, save_path, subreddit="relationship_advice", format="short"):
+    create_reddit_thumbnail(
+        title_text=title_text,
+        subreddit=subreddit,
+        body_text=body_text,
+        output_path=save_path,
+        format=format,
+        post_url=post_url
+    )
 
 def fetch_reddit_posts():
     posts_collected = []
@@ -242,7 +246,7 @@ def fetch_reddit_posts():
 
     # Configuration toggles from environment
     only_shorts = os.getenv("ONLY_SHORTS", "true").lower() in ("true", "1", "yes")
-    target_shorts = int(os.getenv("TARGET_SHORTS_PER_DAY", "3"))
+    target_shorts = int(os.getenv("TARGET_SHORTS_PER_DAY", "3" if only_shorts else "2"))
     target_videos = 0 if only_shorts else int(os.getenv("TARGET_VIDEOS_PER_DAY", "1"))
 
     shorts_collected = 0
@@ -266,67 +270,26 @@ def fetch_reddit_posts():
         post_url = raw_permalink if raw_permalink.startswith("http") else f"https://www.reddit.com{raw_permalink}"
 
         # ----- LONG VIDEO STORIES (Only if not in ONLY_SHORTS mode) -----
-        if not only_shorts and word_count > 400 and videos_collected < target_videos:
-            if word_count <= MAX_VIDEO_WORDS:
-                if shorts_collected >= target_shorts:
-                    # Save single-part video
-                    story = {
-                        "title": gemini_title,
-                        "text": text,
-                        "part": 1,
-                        "total_parts": 1,
-                        "format": "video"
-                    }
+        if not only_shorts and word_count > 350 and videos_collected < target_videos:
+            story = {
+                "title": gemini_title,
+                "text": text,
+                "part": 1,
+                "total_parts": 1,
+                "format": "video",
+                "subreddit": subreddit
+            }
 
-                    story_path = os.path.join(out_dir_today, f"story_{idx_today}.json")
-                    with open(story_path, "w", encoding="utf-8") as f:
-                        json.dump(story, f, indent=4, ensure_ascii=False)
+            story_path = os.path.join(out_dir_today, f"story_{idx_today}.json")
+            with open(story_path, "w", encoding="utf-8") as f:
+                json.dump(story, f, indent=4, ensure_ascii=False)
 
-                    screenshot_path = os.path.join(out_dir_today, f"thumb_{idx_today}.png")
-                    get_or_create_thumbnail(post_url, gemini_title, text, screenshot_path)
+            screenshot_path = os.path.join(out_dir_today, f"thumb_{idx_today}.png")
+            get_or_create_thumbnail(post_url, gemini_title, text, screenshot_path, subreddit=subreddit, format="video")
 
-                    print(f"🎬 Saved video story: {story_path}")
-                    idx_today += 1
-                    videos_collected += 1
-
-            else:
-                # Split into multiple parts
-                parts = split_story(text, MAX_VIDEO_WORDS)
-                total_parts = len(parts)
-
-                for i, part in enumerate(parts):
-                    story = {
-                        "title": f"{gemini_title} [Part {i+1} of {total_parts}]",
-                        "text": part.strip(),
-                        "part": i + 1,
-                        "total_parts": total_parts,
-                        "format": "video"
-                    }
-
-                    if i == 0 and shorts_collected >= target_shorts and videos_collected < target_videos:
-                        story_path = os.path.join(out_dir_today, f"story_{idx_today}.json")
-                        with open(story_path, "w", encoding="utf-8") as f:
-                            json.dump(story, f, indent=4, ensure_ascii=False)
-
-                        screenshot_path = os.path.join(out_dir_today, f"thumb_{idx_today}.png")
-                        get_or_create_thumbnail(post_url, gemini_title, text, screenshot_path)
-
-                        print(f"🎬 Saved multi-part video story (Part 1): {story_path}")
-                        idx_today += 1
-                        videos_collected += 1
-                    else:
-                        # Schedule future parts
-                        future_date = date_today + timedelta(days=i)
-                        future_str = future_date.strftime("%Y%m%d")
-                        future_dir = os.path.join(PROJECT_ROOT, "reddit_stories", future_str)
-                        os.makedirs(future_dir, exist_ok=True)
-                        future_idx = len([f for f in os.listdir(future_dir) if f.startswith("story_")]) + 1
-                        future_path = os.path.join(future_dir, f"story_{future_idx}.json")
-
-                        with open(future_path, "w", encoding="utf-8") as f:
-                            json.dump(story, f, indent=4, ensure_ascii=False)
-
-                        print(f"📅 Scheduled Part {i+1} for {future_str}: {future_path}")
+            print(f"🎬 Saved video story: {story_path}")
+            idx_today += 1
+            videos_collected += 1
 
         # ----- SHORT STORIES -----
         elif shorts_collected < target_shorts:
@@ -355,7 +318,7 @@ def fetch_reddit_posts():
                     json.dump(story, f, indent=4, ensure_ascii=False)
 
                 screenshot_path = os.path.join(out_dir_today, f"thumb_{idx_today}.png")
-                get_or_create_thumbnail(post_url, gemini_title, part.strip(), screenshot_path)
+                get_or_create_thumbnail(post_url, gemini_title, part.strip(), screenshot_path, subreddit=subreddit, format="short")
 
                 print(f"🎯 Saved short story: {story_path}")
                 idx_today += 1

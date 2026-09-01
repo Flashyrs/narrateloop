@@ -1,195 +1,386 @@
 import os
-import time
+import sys
+import glob
+import random
 import subprocess
 import textwrap
-from shlex import quote
-from playwright.sync_api import sync_playwright
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-
-def capture_reddit_screenshot(reddit_url, save_path, retries=3, delay=2):
-    """
-    Attempts to capture a clean screenshot of a Reddit post using Playwright.
-    If it fails after all retries, falls back to full-page capture or returns False.
-    """
-    for attempt in range(1, retries + 1):
-        try:
-            print(f"🔁 Attempt {attempt} to capture screenshot...")
-            return _capture_with_playwright(reddit_url, save_path)
-        except Exception as e:
-            print(f"⚠️ Screenshot attempt {attempt} failed: {e}")
-            time.sleep(delay)
-
-    # If all attempts fail, try a full-page fallback capture
-    fallback_path = os.path.splitext(save_path)[0] + "_full.png"
+if sys.platform == "win32":
     try:
-        print("📄 Trying full-page fallback...")
-        return _capture_with_playwright(reddit_url, fallback_path, full_page=True)
-    except Exception as fallback_e:
-        print(f"❌ Final fallback failed: {fallback_e}")
-        return False
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
-def _capture_with_playwright(reddit_url, save_path, full_page=False):
+def get_random_gameplay_clip():
     """
-    Handles Playwright page launch, navigation, and screenshot capture logic.
+    Returns the path to a random gameplay clip from assets/gameplays.
     """
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            locale="en-US",
-            viewport={"width": 1080, "height": 1920},
-            extra_http_headers={
-                "Accept-Language": "en-US,en;q=0.9",
-                "DNT": "1"
-            }
-        )
+    gameplays_dir = os.path.join(PROJECT_ROOT, "assets", "gameplays")
+    clips = glob.glob(os.path.join(gameplays_dir, "*.mp4")) + glob.glob(os.path.join(gameplays_dir, "*.mkv"))
+    if clips:
+        return random.choice(clips)
+    return None
 
-        page = context.new_page()
-        print(f"🌐 Opening Reddit post: {reddit_url}")
-        page.goto(reddit_url, timeout=90000)
 
-        # Handle cookie consent
+def extract_gameplay_frame(gameplay_path=None, width=1080, height=1920):
+    """
+    Extracts a high-definition random frame from a gameplay video.
+    Returns a PIL RGBA Image.
+    """
+    if not gameplay_path or not os.path.exists(gameplay_path):
+        gameplay_path = get_random_gameplay_clip()
+
+    if gameplay_path and os.path.exists(gameplay_path):
         try:
-            page.locator("text=Accept All").click(timeout=3000)
-            page.wait_for_timeout(1000)
-        except:
-            pass  # Ignore if not shown
+            # Probe video duration
+            probe_cmd = [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                gameplay_path
+            ]
+            res = subprocess.run(probe_cmd, stdout=subprocess.PIPE, text=True, check=True)
+            duration = float(res.stdout.strip()) if res.stdout.strip() else 60.0
+            
+            # Pick a random second
+            start_sec = random.uniform(5.0, max(6.0, duration - 10.0))
+            tmp_frame_path = os.path.join(PROJECT_ROOT, f"scratch_frame_{random.randint(1000, 9999)}.png")
+            
+            vf = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"
+            extract_cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(start_sec),
+                "-i", gameplay_path,
+                "-vframes", "1",
+                "-vf", vf,
+                tmp_frame_path
+            ]
+            subprocess.run(extract_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
 
-        # Optional scroll to help load post content
-        for _ in range(3):
-            page.mouse.wheel(0, 600)
-            page.wait_for_timeout(600)
-
-        # Try expanding long posts
-        try:
-            read_more = page.locator("text=Read more")
-            if read_more.is_visible():
-                read_more.click(timeout=2000)
-                page.wait_for_timeout(1000)
-        except:
-            pass  # Not all posts have 'Read more'
-
-        # Required elements to screenshot
-        title_selector = "h1[id^='post-title-t3_']"
-        body_selector = "div[id$='-post-rtjson-content']"
-
-        try:
-            title = page.wait_for_selector(title_selector, timeout=30000)
-            content = page.wait_for_selector(body_selector, timeout=30000)
+            if os.path.exists(tmp_frame_path):
+                img = Image.open(tmp_frame_path).convert("RGBA")
+                try:
+                    os.remove(tmp_frame_path)
+                except Exception:
+                    pass
+                return img
         except Exception as e:
-            raise Exception(f"❌ Could not locate title or content area: {e}")
+            print(f"⚠️ Could not extract video snippet frame: {e}")
 
-        # Scroll both elements into view
-        page.evaluate("el => el.scrollIntoView({behavior: 'smooth', block: 'center'})", title)
-        page.wait_for_timeout(500)
-        page.evaluate("el => el.scrollIntoView({behavior: 'smooth', block: 'center'})", content)
-        page.wait_for_timeout(500)
-
-        if full_page:
-            page.screenshot(path=save_path, full_page=True)
-            print(f"📸 Full-page fallback screenshot saved: {save_path}")
-            return True
-
-        # Calculate bounding box for precise crop
-        title_box = title.bounding_box()
-        content_box = content.bounding_box()
-
-        if title_box and content_box:
-            x = min(title_box["x"], content_box["x"])
-            y = min(title_box["y"], content_box["y"])
-            max_x = max(title_box["x"] + title_box["width"], content_box["x"] + content_box["width"])
-            max_y = max(title_box["y"] + title_box["height"], content_box["y"] + content_box["height"])
-
-            width = max_x - x
-            height = max_y - y
-
-            # Avoid overflow beyond viewport
-            viewport = page.viewport_size
-            width = min(width, viewport["width"] - x)
-            height = min(height, viewport["height"] - y)
-
-            if width > 0 and height > 0:
-                page.screenshot(path=save_path, clip={
-                    "x": x,
-                    "y": y,
-                    "width": width,
-                    "height": height
-                })
-                print(f"✅ Screenshot saved: {save_path}")
-                return True
-
-        raise Exception("❌ Invalid bounding box or empty clip area.")
+    # Fallback to a sleek gradient dark canvas if no video exists
+    return Image.new("RGBA", (width, height), (20, 22, 25, 255))
 
 
-# ------------------ TEXT CLEANING HELPERS ------------------ #
-
-def clean_text(text):
+def get_system_font(bold=False, size=36):
     """
-    Removes problematic characters and normalizes ASCII.
+    Finds and loads a crisp system font (Arial, DejaVu, Liberation, etc.).
     """
-    return (
-        text.encode("ascii", errors="ignore").decode()
-        .replace(":", "")
-        .replace("'", "")
-        .replace("\"", "")
-        .strip()
+    font_names = (
+        ["arialbd.ttf", "LiberationSans-Bold.ttf", "DejaVuSans-Bold.ttf", "FreeSansBold.ttf", "impact.ttf"]
+        if bold else
+        ["arial.ttf", "LiberationSans-Regular.ttf", "DejaVuSans.ttf", "FreeSans.ttf", "calibri.ttf"]
+    )
+    
+    # Common font directories
+    font_dirs = [
+        r"C:\Windows\Fonts",
+        "/usr/share/fonts/truetype/liberation",
+        "/usr/share/fonts/truetype/dejavu",
+        "/usr/share/fonts/truetype/freefont",
+        "/usr/share/fonts"
+    ]
+    
+    for fname in font_names:
+        for fdir in font_dirs:
+            p = os.path.join(fdir, fname)
+            if os.path.exists(p):
+                try:
+                    return ImageFont.truetype(p, size)
+                except Exception:
+                    pass
+        # Try direct load by name
+        try:
+            return ImageFont.truetype(fname, size)
+        except Exception:
+            pass
+
+    return ImageFont.load_default()
+
+
+def render_reddit_card_pil(title_text, subreddit, body_text="", card_width=920):
+    """
+    Renders a realistic, modern Reddit UI post card with rounded corners,
+    subreddit logo, title, and upvote capsule.
+    """
+    pad = 36
+    
+    title_font = get_system_font(bold=True, size=44)
+    body_font = get_system_font(bold=False, size=30)
+    meta_font = get_system_font(bold=True, size=28)
+    small_font = get_system_font(bold=False, size=24)
+
+    # Inner usable width
+    usable_w = card_width - (pad * 2)
+
+    # Dynamic word wrapping based on pixel width
+    words = title_text.split()
+    wrapped_title = []
+    current_line = []
+
+    # Temporary draw object for measuring
+    temp_img = Image.new("RGBA", (1, 1))
+    temp_draw = ImageDraw.Draw(temp_img)
+
+    for w in words:
+        test_line = " ".join(current_line + [w])
+        try:
+            line_w = temp_draw.textlength(test_line, font=title_font)
+        except Exception:
+            line_w = len(test_line) * 26
+        
+        if line_w <= usable_w or not current_line:
+            current_line.append(w)
+        else:
+            wrapped_title.append(current_line)
+            current_line = [w]
+    if current_line:
+        wrapped_title.append(current_line)
+
+    title_height = len(wrapped_title) * 56
+
+    # Body snippet preview (wrapped cleanly)
+    wrapped_body = []
+    if body_text:
+        b_words = body_text.split()
+        b_curr = []
+        for w in b_words:
+            test_line = " ".join(b_curr + [w])
+            try:
+                line_w = temp_draw.textlength(test_line, font=body_font)
+            except Exception:
+                line_w = len(test_line) * 18
+            if line_w <= usable_w or not b_curr:
+                b_curr.append(w)
+            else:
+                wrapped_body.append(b_curr)
+                b_curr = [w]
+                if len(wrapped_body) >= 2:
+                    break
+        if b_curr and len(wrapped_body) < 2:
+            wrapped_body.append(b_curr)
+
+    body_height = (len(wrapped_body) * 38) if wrapped_body else 0
+    card_height = pad + 40 + 16 + title_height + (16 + body_height if body_height else 0) + 24 + 48 + pad
+
+    # Create transparent card surface
+    card = Image.new("RGBA", (card_width, card_height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(card)
+
+    # Card background (Reddit Dark Mode #181A1B) with border
+    card_bg = (24, 26, 28, 245)
+    draw.rounded_rectangle(
+        [0, 0, card_width, card_height],
+        radius=24,
+        fill=card_bg,
+        outline=(58, 62, 66, 255),
+        width=2
     )
 
+    # Subreddit icon (Reddit Orange circle with 'r/')
+    icon_r = 18
+    draw.ellipse([pad, pad, pad + icon_r * 2, pad + icon_r * 2], fill=(255, 69, 0, 255))
+    draw.text((pad + 7, pad + 4), "r/", font=meta_font, fill=(255, 255, 255, 255))
 
-def escape_ffmpeg_text(text):
+    sub_label = f"r/{subreddit}"
+    draw.text((pad + icon_r * 2 + 14, pad + 2), sub_label, font=meta_font, fill=(255, 255, 255, 255))
+
+    try:
+        sub_len = draw.textlength(sub_label, font=meta_font)
+    except Exception:
+        sub_len = len(sub_label) * 16
+    draw.text((pad + icon_r * 2 + 14 + sub_len + 10, pad + 5), "• 4h ago", font=small_font, fill=(145, 150, 155, 255))
+
+    # Justified Title Rendering (occupies full container width)
+    curr_y = pad + icon_r * 2 + 18
+    for idx, line_words in enumerate(wrapped_title):
+        is_last_line = (idx == len(wrapped_title) - 1)
+        if is_last_line or len(line_words) <= 1:
+            draw.text((pad, curr_y), " ".join(line_words), font=title_font, fill=(245, 245, 248, 255))
+        else:
+            try:
+                words_tot_w = sum(draw.textlength(w, font=title_font) for w in line_words)
+                space_avail = usable_w - words_tot_w
+                gap = space_avail / (len(line_words) - 1)
+            except Exception:
+                gap = 14
+            
+            # If gap is within reasonable justified range (not excessively stretched)
+            if 6 <= gap <= 36:
+                curr_x = pad
+                for w in line_words:
+                    draw.text((curr_x, curr_y), w, font=title_font, fill=(245, 245, 248, 255))
+                    try:
+                        w_len = draw.textlength(w, font=title_font)
+                    except Exception:
+                        w_len = len(w) * 26
+                    curr_x += w_len + gap
+            else:
+                draw.text((pad, curr_y), " ".join(line_words), font=title_font, fill=(245, 245, 248, 255))
+        curr_y += 56
+
+    # Body snippet (cleanly styled)
+    if wrapped_body:
+        curr_y += 8
+        for line_words in wrapped_body:
+            draw.text((pad, curr_y), " ".join(line_words), font=body_font, fill=(180, 185, 190, 255))
+            curr_y += 38
+
+    # Upvotes Pill Badge
+    curr_y += 18
+    pill_w, pill_h = 160, 46
+    draw.rounded_rectangle([pad, curr_y, pad + pill_w, curr_y + pill_h], radius=23, fill=(45, 48, 52, 255))
+    draw.text((pad + 20, curr_y + 10), "▲ 24.8k ▼", font=small_font, fill=(220, 225, 230, 255))
+
+    # Comments Pill
+    c_x = pad + pill_w + 14
+    c_w = 175
+    draw.rounded_rectangle([c_x, curr_y, c_x + c_w, curr_y + pill_h], radius=23, fill=(45, 48, 52, 255))
+    draw.text((c_x + 16, curr_y + 10), "💬 1.4k comments", font=small_font, fill=(175, 180, 185, 255))
+
+    return card
+
+
+def composite_card_over_background(card_img, bg_img, output_path, format="short"):
     """
-    Escapes text for safe FFmpeg usage in drawtext filters.
+    Overlays the Reddit Card with a Gaussian drop-shadow onto the background gameplay frame.
     """
-    return text.replace("'", r"\'").replace(":", r"\:")
+    w, h = bg_img.size
+    card_w, card_h = card_img.size
+
+    # 1. Create soft drop shadow
+    shadow_margin = 30
+    shadow = Image.new("RGBA", (card_w + shadow_margin * 2, card_h + shadow_margin * 2), (0, 0, 0, 0))
+    s_draw = ImageDraw.Draw(shadow)
+    s_draw.rounded_rectangle(
+        [shadow_margin, shadow_margin, card_w + shadow_margin, card_h + shadow_margin],
+        radius=24,
+        fill=(0, 0, 0, 190)
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(16))
+
+    # 2. Position card (not full viewport, centered horizontally, upper-third)
+    card_x = (w - card_w) // 2
+    card_y = int(h * 0.22) if format == "short" else int(h * 0.16)
+
+    # 3. Composite onto gameplay frame
+    bg_img.paste(shadow, (card_x - shadow_margin, card_y - shadow_margin + 6), shadow)
+    bg_img.paste(card_img, (card_x, card_y), card_img)
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    bg_img.convert("RGB").save(output_path, "PNG")
+    print(f"✅ Composite thumbnail saved: {output_path}")
+    return output_path
 
 
-# ------------------ FALLBACK IMAGE GENERATOR ------------------ #
+def capture_reddit_screenshot_card(reddit_url, temp_save_path):
+    """
+    Attempts to capture only the Reddit post card element via Playwright.
+    Returns the PIL Image if successful, None otherwise.
+    """
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+                locale="en-US",
+                viewport={"width": 1080, "height": 1920}
+            )
+            page = context.new_page()
+            page.goto(reddit_url, timeout=30000)
+
+            # Accept cookies
+            try:
+                page.locator("text=Accept All").click(timeout=2000)
+            except Exception:
+                pass
+
+            title_selector = "h1[id^='post-title-t3_']"
+            body_selector = "div[id$='-post-rtjson-content']"
+
+            title = page.wait_for_selector(title_selector, timeout=10000)
+            content = page.wait_for_selector(body_selector, timeout=10000)
+
+            title_box = title.bounding_box()
+            content_box = content.bounding_box()
+
+            if title_box and content_box:
+                x = min(title_box["x"], content_box["x"]) - 16
+                y = min(title_box["y"], content_box["y"]) - 16
+                max_x = max(title_box["x"] + title_box["width"], content_box["x"] + content_box["width"]) + 16
+                max_y = max(title_box["y"] + title_box["height"], content_box["y"] + content_box["height"]) + 16
+
+                x = max(0, x)
+                y = max(0, y)
+                width = max_x - x
+                height = min(max_y - y, 900)  # Cap height so it doesn't cover screen
+
+                page.screenshot(path=temp_save_path, clip={"x": x, "y": y, "width": width, "height": height})
+                browser.close()
+                if os.path.exists(temp_save_path):
+                    return Image.open(temp_save_path).convert("RGBA")
+            browser.close()
+    except Exception as e:
+        print(f"ℹ️ Playwright card capture skipped ({e})")
+    return None
+
+
+def create_reddit_thumbnail(title_text, subreddit="relationship_advice", body_text="", output_path="thumb.png", format="short", gameplay_path=None, post_url=None):
+    """
+    Master thumbnail generator:
+    1. Extracts a random snippet frame from the selected gameplay video as the background.
+    2. Overlays the Reddit post card (either Playwright screenshot or realistic Reddit UI card)
+       in the foreground (occupying ~85% width, never the full viewport).
+    3. Saves the final composite image.
+    """
+    w, h = (1080, 1920) if format == "short" else (1920, 1080)
+    card_w = int(w * 0.86)
+
+    # 1. Background gameplay video snippet frame
+    bg_img = extract_gameplay_frame(gameplay_path=gameplay_path, width=w, height=h)
+
+    # 2. Foreground Reddit Card
+    card_img = None
+    if post_url:
+        temp_cap = os.path.join(PROJECT_ROOT, f"temp_cap_{random.randint(1000, 9999)}.png")
+        card_img = capture_reddit_screenshot_card(post_url, temp_cap)
+        if os.path.exists(temp_cap):
+            try:
+                os.remove(temp_cap)
+            except Exception:
+                pass
+        if card_img:
+            # Resize captured card to fit width
+            aspect = card_img.height / card_img.width
+            new_h = int(card_w * aspect)
+            new_h = min(new_h, int(h * 0.45)) # Cap height
+            card_img = card_img.resize((card_w, new_h), Image.Resampling.LANCZOS)
+
+    # If no screenshot captured, render the realistic Reddit Card
+    if card_img is None:
+        card_img = render_reddit_card_pil(title_text, subreddit, body_text=body_text, card_width=card_w)
+
+    # 3. Composite card in foreground over gameplay background
+    return composite_card_over_background(card_img, bg_img, output_path, format=format)
+
+
+# Backwards compatibility wrappers
+def capture_reddit_screenshot(reddit_url, save_path, retries=1, delay=1):
+    return False
 
 def create_fallback_thumbnail(title_text, body_text, output_path, width=1080, height=1920):
-    """
-    Uses FFmpeg to create a basic image with title and body text if Playwright fails.
-    """
-    print("🛠️ Creating fallback thumbnail using FFmpeg...")
-
-    # Wrap and sanitize text
-    title_wrapped = '\\n'.join(textwrap.wrap(clean_text(title_text), width=30))
-    body_wrapped = '\\n'.join(textwrap.wrap(clean_text(body_text), width=50))
-
-    # Escape for drawtext filter
-    safe_title = escape_ffmpeg_text(title_wrapped)
-    safe_body = escape_ffmpeg_text(body_wrapped)
-
-    # Font paths with fallback
-    def get_font_path(primary_name, fallback_name="arial.ttf"):
-        p = os.path.join(r"C:\Windows\Fonts", primary_name)
-        if os.path.exists(p):
-            return p.replace("\\", "/")
-        fb = os.path.join(r"C:\Windows\Fonts", fallback_name)
-        return fb.replace("\\", "/") if os.path.exists(fb) else primary_name
-
-    title_font = get_font_path("impact.ttf", "arialbd.ttf")
-    body_font = get_font_path("arial.ttf", "calibri.ttf")
-
-    # Build FFmpeg filter text
-    filter_text = (
-        f"color=white@1.0:s={width}x{height},"
-        f"drawbox=color=orange@1.0:x=0:y=0:w=iw:h=ih:t=40,"
-        f"drawtext=fontfile='{title_font}':text='{safe_title}':"
-        f"fontcolor=black:fontsize=64:x=(w-text_w)/2:y=100:"
-        f"box=1:boxcolor=white@0.85:boxborderw=30:line_spacing=10,"
-        f"drawtext=fontfile='{body_font}':text='{safe_body}':"
-        f"fontcolor=black:fontsize=42:x=100:y=400:"
-        f"box=1:boxcolor=white@0.75:boxborderw=20:line_spacing=8"
-    )
-
-    cmd = [
-        "ffmpeg", "-f", "lavfi", "-i", filter_text,
-        "-frames:v", "1", "-y", output_path
-    ]
-
-    try:
-        subprocess.run(cmd, check=True)
-        print(f"✅ Fallback thumbnail created: {output_path}")
-    except subprocess.CalledProcessError as e:
-        print(f"❌ FFmpeg fallback error: {e}")
+    return create_reddit_thumbnail(title_text, "relationship_advice", body_text, output_path)
