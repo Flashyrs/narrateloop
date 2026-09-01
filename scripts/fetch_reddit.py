@@ -21,14 +21,30 @@ if sys.platform == "win32":
 load_dotenv()
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-SUBREDDITS = [
+# Curated list of most engaging, viral, and entertaining story subreddits
+DEFAULT_SUBREDDITS = [
     "relationship_advice",
     "TrueOffMyChest",
-    "TIFU",
-    "AmITheAsshole",
+    "tifu",
+    "AmItheAsshole",
+    "AITAH",
     "confessions",
-    "AskReddit"
+    "NuclearRevenge",
+    "ProRevenge",
+    "pettyrevenge",
+    "entitledparents",
+    "EntitledPeople",
+    "maliciouscompliance",
+    "AskReddit",
+    "offmychest",
+    "Stories"
 ]
+
+env_subreddits = os.getenv("SUBREDDITS")
+if env_subreddits:
+    SUBREDDITS = [s.strip() for s in env_subreddits.split(",") if s.strip()]
+else:
+    SUBREDDITS = DEFAULT_SUBREDDITS
 
 CENSOR_WORDS = ["fuck", "shit", "bitch", "asshole", "dick", "bastard", "crap", "cunt", "fag", "nigger"]
 
