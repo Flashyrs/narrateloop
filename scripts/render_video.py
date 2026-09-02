@@ -228,14 +228,14 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
     extra_inputs = []
     if overlay_img_path:
         overlay_path_ffmpeg = overlay_img_path.replace("\\", "/")
-        extra_inputs = ["-i", overlay_path_ffmpeg]
+        extra_inputs = ["-loop", "1", "-i", overlay_path_ffmpeg]
         fade_d = 0.4
         fade_st = max(0.1, title_end_time - fade_d)
         
         filter_complex = (
             f"[2:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},format=yuva420p,fade=t=out:st={fade_st:.2f}:d={fade_d:.2f}:alpha=1[card];"
             f"[0:v]fps=30,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1[gameplay];"
-            f"[gameplay][card]overlay=0:0:enable='between(t,0,{title_end_time:.2f})'[v_merged];"
+            f"[gameplay][card]overlay=0:0:enable='between(t,0,{title_end_time:.2f})':eof_action=pass[v_merged];"
             f"[v_merged]subtitles='{subtitle_path_ffmpeg}'[v_out]"
         )
         map_args = ["-filter_complex", filter_complex, "-map", "[v_out]", "-map", "1:a:0"]

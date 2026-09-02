@@ -1,10 +1,19 @@
 import os
 import json
+import subprocess
 from datetime import datetime
 from scripts.upload_to_youtube import upload_video, generate_title_and_description
 
+def get_current_time():
+    tz_name = os.getenv("TIMEZONE", "Asia/Kolkata")
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(tz_name))
+    except Exception:
+        return datetime.now()
+
 def upload_pending_video():
-    date_str = datetime.now().strftime("%Y%m%d")
+    date_str = get_current_time().strftime("%Y%m%d")
     output_dir = os.path.join("output", date_str)
     reddit_dir = os.path.join("reddit_stories", date_str)
     uploaded_log = os.path.join(output_dir, "uploaded.txt")
@@ -18,12 +27,27 @@ def upload_pending_video():
 
     for i in range(1, 4):
         video_file = f"final_{i}.mp4"
-        if video_file in already_uploaded:
+        if any(video_file in line for line in already_uploaded):
             continue
 
         video_path = os.path.join(output_dir, video_file)
         story_path = os.path.join(reddit_dir, f"story_{i}.json")
         if not os.path.exists(video_path) or not os.path.exists(story_path):
+            continue
+
+        # Sanity check with ffprobe
+        try:
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            dur = float(probe.stdout.strip())
+            if dur < 3.0:
+                print(f"[Upload] Skipping {video_file}: corrupted or too short ({dur}s).")
+                continue
+        except Exception:
             continue
 
         with open(story_path, "r", encoding="utf-8") as f:
@@ -32,7 +56,7 @@ def upload_pending_video():
         title, description, tags = generate_title_and_description(story)
         url = upload_video(video_path, title, description, tags=tags)
         with open(uploaded_log, "a") as f:
-            f.write(video_file + "\n")
+            f.write(f"{video_file} | {title} | {url}\n")
         return f"Uploaded {video_file}\n{url}"
 
     return "No pending videos to upload."

@@ -199,6 +199,14 @@ async def safe_reply(update: Update, text: str):
     except Exception as e:
         log(f"Reply failed: {e}")
 
+def get_current_time():
+    tz_name = os.getenv("TIMEZONE", "Asia/Kolkata")
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(tz_name))
+    except Exception:
+        return datetime.now()
+
 def get_upload_schedule():
     custom_sched = os.getenv("UPLOAD_SCHEDULE")
     if custom_sched:
@@ -218,27 +226,28 @@ def schedule_uploads():
     def loop():
         last_sent = ""
         while True:
-            now = datetime.now().strftime("%H:%M")
+            current_dt = get_current_time()
+            now = current_dt.strftime("%H:%M")
             if now != last_sent:
                 schedule_map = get_upload_schedule()
                 for hour, story_num in schedule_map.items():
                     if now == hour:
-                        send_telegram_log(f"⏰ Auto upload trigger: story_{story_num}.json")
+                        send_telegram_log(f"⏰ Auto upload trigger: story_{story_num}.json (Time: {now})")
 
-                        def run():
+                        def run(sn=story_num):
                             global is_running
                             is_running = True
                             try:
-                                run_pipeline_upload_specific(story_num)
+                                run_pipeline_upload_specific(sn)
                             except Exception as e:
-                                log(f"[AutoUpload] Error uploading story {story_num}: {e}")
+                                log(f"[AutoUpload] Error uploading story {sn}: {e}")
                             finally:
                                 is_running = False
                                 clear_progress_state()
 
                         Thread(target=run, daemon=True).start()
                 last_sent = now
-            time.sleep(30)
+            time.sleep(25)
 
     Thread(target=loop, daemon=True).start()
 

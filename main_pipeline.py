@@ -33,8 +33,17 @@ active_flags = {
 }
 
 
+def get_current_time():
+    tz_name = os.getenv("TIMEZONE", "Asia/Kolkata")
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(tz_name))
+    except Exception:
+        return datetime.now()
+
+
 def log(message, date_str=None, telegram=False, tts_progress=False):
-    timestamp = datetime.now().strftime("[%H:%M:%S]")
+    timestamp = get_current_time().strftime("[%H:%M:%S]")
     full_message = f"{timestamp} {message}"
     print(full_message)
 
@@ -113,7 +122,7 @@ def get_next_valid_gameplay():
 
 def run_pipeline(upload=False):
     start_time = time.time()
-    date_str = datetime.now().strftime("%Y%m%d")
+    date_str = get_current_time().strftime("%Y%m%d")
     cleanup_old_data()
     refresh_pending_queue()
 
@@ -193,7 +202,7 @@ def run_pipeline(upload=False):
     send_telegram_log(f"⏳ Startup time: {elapsed} sec")
 
 def run_pipeline_upload_specific(index):
-    date_str = datetime.now().strftime("%Y%m%d")
+    date_str = get_current_time().strftime("%Y%m%d")
     output_dir = os.path.join(PROJECT_ROOT, "output", date_str)
     uploaded_log = os.path.join(output_dir, "uploaded.txt")
     reddit_day_path = os.path.join(REDDIT_DIR, date_str)
@@ -220,6 +229,22 @@ def run_pipeline_upload_specific(index):
                 log(f"Video final_{index}.mp4 already uploaded.", date_str, telegram=True)
                 return
 
+    # Integrity verification: check that video has valid streams and non-zero duration
+    try:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", output_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        dur = float(probe.stdout.strip())
+        if dur < 3.0:
+            log(f"❌ Aborting upload: final_{index}.mp4 is invalid or corrupted ({dur}s).", date_str, telegram=True)
+            return
+    except Exception as pe:
+        log(f"❌ Aborting upload: final_{index}.mp4 verification error: {pe}", date_str, telegram=True)
+        return
+
     # ✅ Now safe to generate title, etc.
     title, description, tags = generate_title_and_description(story)
     thumbnail_path_png = os.path.join(reddit_day_path, f"thumb_{index}.png")
@@ -239,7 +264,7 @@ def run_pipeline_upload_specific(index):
 
 def get_upload_status(date_str=None):
     if not date_str:
-        date_str = datetime.now().strftime("%Y%m%d")
+        date_str = get_current_time().strftime("%Y%m%d")
 
     output_base = os.path.join(PROJECT_ROOT, "output", date_str)
     if not os.path.exists(output_base):
