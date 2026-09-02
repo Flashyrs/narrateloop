@@ -94,10 +94,14 @@ def upload_video(file_path, title, description, tags=None, thumbnail_path=None):
     ).execute()
 
     if thumbnail_path and os.path.exists(thumbnail_path):
-        youtube.thumbnails().set(
-            videoId=response["id"],
-            media_body=MediaFileUpload(thumbnail_path)
-        ).execute()
+        try:
+            youtube.thumbnails().set(
+                videoId=response["id"],
+                media_body=MediaFileUpload(thumbnail_path)
+            ).execute()
+            print("🖼️ Custom thumbnail set successfully.")
+        except Exception as te:
+            print(f"⚠️ Custom thumbnail upload skipped ({te})")
 
     video_url = f"https://youtube.com/watch?v={response['id']}"
     print(f"✅ Uploaded: {video_url}")
