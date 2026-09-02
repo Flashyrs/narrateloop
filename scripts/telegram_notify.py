@@ -221,13 +221,36 @@ def get_upload_schedule():
     return {"10:00": 1, "16:00": 2, "21:00": 3}
 
 def schedule_uploads():
-    from main_pipeline import run_pipeline_upload_specific  
+    from main_pipeline import run_pipeline_upload_specific, run_pipeline  
 
     def loop():
         last_sent = ""
+        last_daily_date = ""
         while True:
             current_dt = get_current_time()
             now = current_dt.strftime("%H:%M")
+            today_str = current_dt.strftime("%Y%m%d")
+
+            # 1. Daily automated pipeline run (Default 02:00 IST)
+            daily_trigger_time = os.getenv("DAILY_RUN_TIME", "02:00")
+            if now == daily_trigger_time and today_str != last_daily_date:
+                last_daily_date = today_str
+                send_telegram_log(f"🌙 Starting automated daily pipeline for {today_str}...")
+
+                def run_daily():
+                    global is_running
+                    is_running = True
+                    try:
+                        run_pipeline(upload=False)
+                    except Exception as e:
+                        log(f"[DailyPipeline] Error in daily pipeline run: {e}")
+                    finally:
+                        is_running = False
+                        clear_progress_state()
+
+                Thread(target=run_daily, daemon=True).start()
+
+            # 2. Scheduled video uploads (10:00, 16:00, 21:00 IST)
             if now != last_sent:
                 schedule_map = get_upload_schedule()
                 for hour, story_num in schedule_map.items():
