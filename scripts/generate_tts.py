@@ -114,13 +114,27 @@ def detect_gender(text):
 
 
 def clean_text_for_tts(text):
-    """Cleans up typographical punctuation and non-ascii characters for clean TTS."""
+    """Cleans up typographical punctuation, non-ascii characters, URLs, and web links for clean TTS."""
+    if not text:
+        return ""
+    # 1. Strip markdown links: [text](http://...) -> keep text, drop link
+    text = re.sub(r'\[([^\]]+)\]\(https?://[^\)]+\)', r'\1', text)
+    # 2. Strip standard URLs: http://..., https://...
+    text = re.sub(r'https?://\S+', '', text)
+    # 3. Strip www.... links
+    text = re.sub(r'\bwww\.[a-zA-Z0-9\-\._~:/?#\[\]@!$&\'()*+,;=]+', '', text)
+    # 4. Strip common reddit link headers like "Original post:", "Source:", "Link:"
+    text = re.sub(r'(?i)\b(original\s+post|source\s+link|source|post\s+link|reddit\s+link|link|update)\s*:\s*', '', text)
+    text = text.replace(r'\_', '_')
+
     text = text.replace("\u201c", '"').replace("\u201d", '"')
     text = text.replace("\u2018", "'").replace("\u2019", "'")
     text = text.replace("\u2013", "-").replace("\u2014", "-")
     text = text.replace("\u2026", "...")
     text = text.replace("\xa0", " ")
     text = re.sub(r"[^\x00-\x7F]+", "", text)
+    text = re.sub(r'\s+([,.:;?!])', r'\1', text)
+    text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
 

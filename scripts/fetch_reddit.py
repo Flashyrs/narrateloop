@@ -53,7 +53,30 @@ MAX_VIDEO_WORDS = 1500
 MIN_SHORT_WORDS = 225
 MAX_SHORT_WORDS = 300
 
+def strip_links_and_urls(text):
+    """
+    Completely removes all URLs, web links, markdown links, and link headers
+    so they are never spoken by TTS or displayed in subtitles/thumbnails.
+    """
+    if not text:
+        return ""
+    # 1. Strip markdown links: [text](http://...) -> keep text
+    text = re.sub(r'\[([^\]]+)\]\(https?://[^\)]+\)', r'\1', text)
+    # 2. Strip standard URLs: http://..., https://...
+    text = re.sub(r'https?://\S+', '', text)
+    # 3. Strip www.... links
+    text = re.sub(r'\bwww\.[a-zA-Z0-9\-\._~:/?#\[\]@!$&\'()*+,;=]+', '', text)
+    # 4. Strip common reddit link headers like "Original post:", "Source:", "Link:"
+    text = re.sub(r'(?i)\b(original\s+post|source\s+link|source|post\s+link|reddit\s+link|link|update)\s*:\s*', '', text)
+    # 5. Clean escaped backslashes from reddit markdown
+    text = text.replace(r'\_', '_')
+    # 6. Normalize whitespace
+    text = re.sub(r'\s+([,.:;?!])', r'\1', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
 def censor(text):
+    text = strip_links_and_urls(text)
     def replace_word(word):
         return re.sub(rf"\b{re.escape(word)}\b", word[0] + "*" * (len(word) - 1), flags=re.IGNORECASE, string=text)
     for word in CENSOR_WORDS:

@@ -20,7 +20,11 @@ def seconds_to_ass_time(seconds):
     return f"{hours}:{minutes:02}:{secs:02}.{centis:02}"
 
 def clean_word(word):
-    return word.strip().replace("\n", " ").replace("\xa0", " ")
+    w = word.strip().replace("\n", " ").replace("\xa0", " ")
+    # Filter out URLs and web link tokens
+    if any(k in w.lower() for k in ["http:", "https:", "www.", ".com", ".org", ".net", "reddit.com"]):
+        return ""
+    return w
 
 def is_phrase_emphasized(word, full_text):
     word_lower = word.lower()
@@ -47,6 +51,7 @@ def generate_subs(date_str, story_name, format="short"):
     with open(story_path, "r", encoding="utf-8") as f:
         story_text = json.load(f).get("text", "")
 
+    word_timings = [w for w in word_timings if clean_word(w.get("word", "")) != ""]
     word_timings = sorted(word_timings, key=lambda w: w.get("start", 0))
     max_duration = 0.4
     safety_margin = 0.01
