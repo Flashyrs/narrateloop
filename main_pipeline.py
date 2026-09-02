@@ -3,6 +3,7 @@ import sys
 import json
 import re
 import time
+import subprocess
 from datetime import datetime
 
 if sys.platform == "win32":
@@ -218,16 +219,33 @@ def run_pipeline_upload_specific(index):
 
     format = story.get("format", "short")
     output_path = os.path.join(output_dir, f"final_{index}.mp4")
-    if not os.path.exists(output_path):
-        log(f"Final video final_{index}.mp4 not found.", date_str, telegram=True)
-        return
 
-    # Check if already uploaded
+    # If requested index is already uploaded or file missing, find next pending video today
+    already_uploaded = []
     if os.path.exists(uploaded_log):
-        with open(uploaded_log, "r") as f:
-            if any(f"final_{index}.mp4" in line for line in f):
-                log(f"Video final_{index}.mp4 already uploaded.", date_str, telegram=True)
-                return
+        with open(uploaded_log, "r", encoding="utf-8") as f:
+            already_uploaded = f.read().splitlines()
+
+    if not os.path.exists(output_path) or any(f"final_{index}.mp4" in line for line in already_uploaded):
+        found_next = False
+        for cand in [1, 2, 3]:
+            cand_video = f"final_{cand}.mp4"
+            cand_path = os.path.join(output_dir, cand_video)
+            cand_story = os.path.join(reddit_day_path, f"story_{cand}.json")
+            if os.path.exists(cand_path) and os.path.exists(cand_story) and not any(cand_video in line for line in already_uploaded):
+                log(f"Selecting next pending video for upload: final_{cand}.mp4 (slot {index})", date_str, telegram=True)
+                index = cand
+                filename = f"story_{index}.json"
+                story_path = cand_story
+                output_path = cand_path
+                with open(story_path, "r", encoding="utf-8") as sf:
+                    story = json.load(sf)
+                found_next = True
+                break
+
+        if not found_next:
+            log(f"All available videos for {date_str} have already been uploaded.", date_str, telegram=True)
+            return
 
     # Integrity verification: check that video has valid streams and non-zero duration
     try:

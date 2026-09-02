@@ -124,6 +124,15 @@ def render_reddit_card_pil(title_text, subreddit, body_text="", card_width=920):
     meta_font = get_system_font(bold=True, size=28)
     small_font = get_system_font(bold=False, size=24)
 
+    # Clean title (strip [subreddit] tags so it matches real Reddit UI)
+    title_text = re.sub(r"^\[.*?\]\s*", "", title_text).strip()
+
+    # Clean body snippet (remove URLs and 'Original post:' links)
+    if body_text:
+        body_text = re.sub(r"https?://\S+", "", body_text)
+        body_text = re.sub(r"Original post:\s*", "", body_text, flags=re.IGNORECASE)
+        body_text = re.sub(r"\s+", " ", body_text).strip()
+
     # Inner usable width
     usable_w = card_width - (pad * 2)
 
