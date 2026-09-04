@@ -58,8 +58,8 @@ CENSOR_WORDS = ["fuck", "shit", "bitch", "asshole", "dick", "bastard", "crap", "
 
 WORDS_PER_MINUTE = 150
 MAX_VIDEO_WORDS = 1500
-MIN_SHORT_WORDS = 225
-MAX_SHORT_WORDS = 300
+MIN_SHORT_WORDS = 100
+MAX_SHORT_WORDS = 450
 
 def strip_links_and_urls(text):
     """
@@ -91,9 +91,9 @@ def censor(text):
         text = replace_word(word)
     return text
 
-def trim_story_to_short(text, min_words=110, max_words=165):
+def trim_story_to_short(text, min_words=100, max_words=450):
     """
-    Trims a story cleanly at a sentence boundary to fit the 45-55 second Short duration (~120-165 words).
+    Trims a story cleanly at a sentence boundary if needed to fit YouTube Shorts (up to 3 minutes, ~450 words).
     Guarantees no sentence is cut off mid-word.
     """
     sentences = re.split(r'(?<=[.!?])\s+', text.strip())
@@ -111,7 +111,7 @@ def trim_story_to_short(text, min_words=110, max_words=165):
         else:
             if current_word_count >= min_words:
                 break
-            if current_word_count + words_in_s <= max_words + 20:
+            if current_word_count + words_in_s <= max_words + 30:
                 accumulated.append(s)
                 current_word_count += words_in_s
             break
@@ -349,10 +349,17 @@ def fetch_reddit_posts():
             idx_today += 1
             videos_collected += 1
 
-        # ----- SHORT STORIES (Each Short is 1 complete standalone story) -----
+        # ----- SHORT STORIES (Complete standalone stories without truncation) -----
         elif shorts_collected < target_shorts:
-            story_content, word_cnt = trim_story_to_short(text, min_words=110, max_words=165)
-            if word_cnt < 90:
+            # Preserve 100% of complete stories that naturally fit within YouTube Shorts (up to ~3 minutes)
+            if 90 <= word_count <= 450:
+                story_content = text
+                word_cnt = word_count
+            elif word_count > 450:
+                story_content, word_cnt = trim_story_to_short(text, min_words=200, max_words=450)
+                if word_cnt < 90:
+                    continue
+            else:
                 continue
 
             story = {
