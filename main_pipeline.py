@@ -244,7 +244,11 @@ def run_pipeline_upload_specific(index):
                 break
 
         if not found_next:
-            log(f"All available videos for {date_str} have already been uploaded.", date_str, telegram=True)
+            existing_videos = [f"final_{c}.mp4" for c in [1, 2, 3] if os.path.exists(os.path.join(output_dir, f"final_{c}.mp4"))]
+            if not existing_videos:
+                log(f"⚠️ No rendered videos found in {output_dir} for {date_str} to upload.", date_str, telegram=True)
+            else:
+                log(f"All available videos for {date_str} have already been uploaded.", date_str, telegram=True)
             return
 
     # Integrity verification: check that video has valid streams and non-zero duration

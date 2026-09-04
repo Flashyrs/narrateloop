@@ -2,6 +2,7 @@ import os
 import sys
 import glob
 import random
+import re
 import subprocess
 import textwrap
 from PIL import Image, ImageDraw, ImageFont, ImageFilter

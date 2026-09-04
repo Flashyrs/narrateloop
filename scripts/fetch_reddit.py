@@ -21,6 +21,14 @@ if sys.platform == "win32":
 load_dotenv()
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
+def get_current_time():
+    tz_name = os.getenv("TIMEZONE", "Asia/Kolkata")
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(tz_name))
+    except Exception:
+        return datetime.now()
+
 # Curated list of most engaging, viral, and entertaining story subreddits
 DEFAULT_SUBREDDITS = [
     "relationship_advice",
@@ -299,7 +307,7 @@ def fetch_reddit_posts():
     shorts_collected = 0
     videos_collected = 0
 
-    date_today = datetime.now()
+    date_today = get_current_time()
     date_str_today = date_today.strftime("%Y%m%d")
     out_dir_today = os.path.join(PROJECT_ROOT, "reddit_stories", date_str_today)
     os.makedirs(out_dir_today, exist_ok=True)
@@ -332,7 +340,10 @@ def fetch_reddit_posts():
                 json.dump(story, f, indent=4, ensure_ascii=False)
 
             screenshot_path = os.path.join(out_dir_today, f"thumb_{idx_today}.png")
-            get_or_create_thumbnail(post_url, gemini_title, text, screenshot_path, subreddit=subreddit, format="video")
+            try:
+                get_or_create_thumbnail(post_url, gemini_title, text, screenshot_path, subreddit=subreddit, format="video")
+            except Exception as thumb_err:
+                print(f"⚠️ Thumbnail generation warning for story {idx_today}: {thumb_err}")
 
             print(f"🎬 Saved video story: {story_path}")
             idx_today += 1
@@ -358,7 +369,10 @@ def fetch_reddit_posts():
                 json.dump(story, f, indent=4, ensure_ascii=False)
 
             screenshot_path = os.path.join(out_dir_today, f"thumb_{idx_today}.png")
-            get_or_create_thumbnail(post_url, gemini_title, story_content, screenshot_path, subreddit=subreddit, format="short")
+            try:
+                get_or_create_thumbnail(post_url, gemini_title, story_content, screenshot_path, subreddit=subreddit, format="short")
+            except Exception as thumb_err:
+                print(f"⚠️ Thumbnail generation warning for story {idx_today}: {thumb_err}")
 
             print(f"🎯 Saved short story ({word_cnt} words, ~{round(word_cnt/175*60)}s): {story_path}")
             idx_today += 1
