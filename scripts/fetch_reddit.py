@@ -76,7 +76,10 @@ def strip_links_and_urls(text):
     text = re.sub(r'\bwww\.[a-zA-Z0-9\-\._~:/?#\[\]@!$&\'()*+,;=]+', '', text)
     # 4. Strip common reddit link headers like "Original post:", "Source:", "Link:"
     text = re.sub(r'(?i)\b(original\s+post|source\s+link|source|post\s+link|reddit\s+link|link|update)\s*:\s*', '', text)
-    # 5. Clean escaped backslashes from reddit markdown
+    # 5. Strip "submitted by...", "posted by...", and "[link] [comments]" metadata
+    text = re.sub(r'(?i)\b(submitted\s+by|posted\s+by)\b.*', '', text)
+    text = re.sub(r'(?i)\[link\]\s*\[comments\].*', '', text)
+    text = re.sub(r'(?i)\b/?u/\w+\b', '', text)
     text = text.replace(r'\_', '_')
     # 6. Normalize whitespace
     text = re.sub(r'\s+([,.:;?!])', r'\1', text)
@@ -245,8 +248,8 @@ def fetch_reddit_posts():
                         raw_desc = item.get("description", "") or item.get("content", "")
                         # Remove HTML markup and unescape HTML entities
                         clean_text = re.sub(r"<[^>]+>", " ", raw_desc)
-                        clean_text = re.sub(r"submitted by\s+.*?to\s+r/\w+", "", clean_text, flags=re.IGNORECASE)
-                        clean_text = re.sub(r"\[link\]\s+\[comments\]", "", clean_text, flags=re.IGNORECASE)
+                        clean_text = re.sub(r"(?i)\b(submitted\s+by|posted\s+by)\b.*", "", clean_text)
+                        clean_text = re.sub(r"(?i)\[link\]\s*\[comments\].*", "", clean_text)
                         clean_text = html.unescape(clean_text).strip()
                         clean_text = re.sub(r"\s+", " ", clean_text)
 

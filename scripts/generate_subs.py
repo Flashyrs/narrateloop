@@ -21,8 +21,8 @@ def seconds_to_ass_time(seconds):
 
 def clean_word(word):
     w = word.strip().replace("\n", " ").replace("\xa0", " ")
-    # Filter out URLs and web link tokens
-    if any(k in w.lower() for k in ["http:", "https:", "www.", ".com", ".org", ".net", "reddit.com"]):
+    # Filter out URLs, links, and submission metadata
+    if any(k in w.lower() for k in ["http:", "https:", "www.", ".com", ".org", ".net", "reddit.com", "submitted", "/u/", "u/"]):
         return ""
     return w
 

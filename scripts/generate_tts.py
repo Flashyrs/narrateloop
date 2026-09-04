@@ -125,6 +125,10 @@ def clean_text_for_tts(text):
     text = re.sub(r'\bwww\.[a-zA-Z0-9\-\._~:/?#\[\]@!$&\'()*+,;=]+', '', text)
     # 4. Strip common reddit link headers like "Original post:", "Source:", "Link:"
     text = re.sub(r'(?i)\b(original\s+post|source\s+link|source|post\s+link|reddit\s+link|link|update)\s*:\s*', '', text)
+    # 5. Strip "submitted by...", "posted by...", and "[link] [comments]" metadata
+    text = re.sub(r'(?i)\b(submitted\s+by|posted\s+by)\b.*', '', text)
+    text = re.sub(r'(?i)\[link\]\s*\[comments\].*', '', text)
+    text = re.sub(r'(?i)\b/?u/\w+\b', '', text)
     text = text.replace(r'\_', '_')
 
     text = text.replace("\u201c", '"').replace("\u201d", '"')
