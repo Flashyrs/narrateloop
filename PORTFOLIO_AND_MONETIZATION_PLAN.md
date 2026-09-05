@@ -1,7 +1,8 @@
-# NarrateLoop: Portfolio Showcase & YouTube Monetization Strategy
+# AutoReel : Automated Reddit-to-Video GenAI Pipeline
+### Portfolio Showcase & YouTube Monetization Strategy
 
 This document outlines the strategic roadmap for:
-1. **Showcasing NarrateLoop as a FAANG SDE-1 Capstone Project** (Zero cost, live deployment, architecture, endpoints).
+1. **Showcasing AutoReel as a FAANG SDE-1 Capstone Project** (Zero cost, live deployment, architecture, endpoints).
 2. **YouTube Monetization & "Human-Edited" Transformation Strategy** (Bypassing YouTube's automated/reused content policies).
 
 ---
@@ -9,20 +10,21 @@ This document outlines the strategic roadmap for:
 ## Part 1: FAANG SDE-1 Portfolio & Showcase Plan
 
 ### 1. The Resume Positioning
-Rather than describing this as an "AI wrapper", position it as a **Distributed Multimodal Streaming & Automation Engine**:
+Position this project as a **Distributed Multimodal GenAI & Media Streaming Engine**:
 
-> **NarrateLoop – Autonomous Multimodal Content & Media Pipeline**  
-> *Stack: Python, FastAPI, FFmpeg, AsyncIO, Google Gemini NLP, Neural TTS, Linux (Systemd), OCI, YouTube Data API v3*  
+> **AutoReel : Automated Reddit-to-Video GenAI Pipeline**  
+> *Python • FastAPI • FFmpeg (NVENC) • PyTorch • Whisper • Bark • SQLite • Linux (systemd) • Oracle Cloud*  
 > * [Live Dashboard: https://narrateloop.duckdns.org]
 > * [Interactive API Docs: https://narrateloop.duckdns.org/docs]
 > * [GitHub Repository: https://github.com/Flashyrs/reddit-stories]
 > * [YouTube Channel: https://youtube.com/@NarrateLoop]
 
 #### FAANG-Targeted Bullet Points:
-* **Engineered a 24/7 autonomous media generation and ingestion pipeline** deployed on an Oracle Cloud Linux VM, orchestrating LLM text extraction, neural audio synthesis, and automated YouTube distribution with zero human intervention.
-* **Architected a high-throughput FFmpeg filtergraph engine** with sub-pixel overlay placement, dynamic alpha transitions, and audio-video PTS synchronization, eliminating corrupt MOOV atoms and NAL header defects across 100+ production renders.
-* **Designed fault-tolerant ingest pipelines** featuring multi-tier fallback mechanisms (Direct OAuth failover to RSS2JSON proxies, regex data cleansing, and pre-flight `ffprobe` stream validation), achieving 99.9% pipeline reliability against third-party rate limits.
-* **Implemented an asynchronous Telegram daemon** with dual-redundancy process supervision via Linux `systemd` and system cron failovers for real-time remote telemetry and manual overrides.
+* **Built a multi-stage GenAI pipeline** using Suno Bark, Edge-TTS (+30% pacing), Whisper word alignment, and Google Gemini metadata with SQLite-backed restartable asset tracking deployed 24/7 on Oracle Cloud.
+* **Implemented GPU memory monitoring via GPUtil with automatic CPU fallback** on CUDA OOM for unattended 24/7 production operation.
+* **Rendered GPU-accelerated video via FFmpeg NVENC hardware encoding** with sub-pixel overlay placement, dynamic alpha transitions, and dynamic ASS/SSA synchronized subtitle overlays.
+* **Designed fault-tolerant ingest pipelines** with 3-tier fallback (PRAW OAuth to direct datacenter tokens to RSS proxies) and `psutil` concurrency coordination under Linux `systemd`.
+* **Engineered a high-throughput FastAPI telemetry backend** with interactive Swagger `/docs`, video artifact streaming & `.mp4` downloads, and automated Let's Encrypt SSL.
 
 ---
 

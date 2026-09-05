@@ -8,9 +8,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
-from fastapi import FastAPI, HTTPException, Request, Header
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -30,10 +29,10 @@ def get_current_time():
 # FastAPI Application Definition
 # ---------------------------------------------------------------------------
 app = FastAPI(
-    title="NarrateLoop Engine API",
+    title="AutoReel : Automated Reddit-to-Video GenAI Pipeline",
     description="""
-### Autonomous Multimodal Media & Content Ingestion Pipeline
-High-throughput automated backend orchestrating Reddit content extraction, contextual NLP gender classification, neural audio synthesis (+30% pacing), dynamic FFmpeg sub-pixel rendering, and multi-tier YouTube distribution.
+### AutoReel — Distributed Multimodal Media & Content Ingestion Engine
+High-throughput autonomous backend orchestrating Reddit content extraction, contextual NLP gender classification, neural audio synthesis (+30% pacing), dynamic FFmpeg sub-pixel video rendering, and multi-tier YouTube distribution.
     """,
     version="1.0.0",
     docs_url="/docs",
@@ -59,7 +58,7 @@ class HealthMetrics(BaseModel):
     memory_total_mb: float = Field(..., example=980.0)
     memory_percent: float = Field(..., example=42.1)
     disk_percent: float = Field(..., example=31.8)
-    server_time: str = Field(..., example="2026-09-05 13:55:00 IST")
+    server_time: str = Field(..., example="2026-09-05 15:10:00 IST")
 
 class PipelineStatus(BaseModel):
     service_active: bool = Field(..., example=True)
@@ -82,12 +81,17 @@ class StoryItem(BaseModel):
 
 class VideoItem(BaseModel):
     index: int = Field(..., example=1)
+    date: str = Field(..., example="20260905")
     filename: str = Field(..., example="final_1.mp4")
     duration_seconds: Optional[float] = Field(None, example=142.5)
     size_mb: Optional[float] = Field(None, example=18.4)
     is_uploaded: bool = Field(..., example=True)
     youtube_url: Optional[str] = Field(None, example="https://youtube.com/watch?v=abc123xyz")
+    download_url: str = Field(..., example="/api/videos/20260905/1/download")
+    stream_url: str = Field(..., example="/api/videos/20260905/1/stream")
+    thumbnail_url: str = Field(..., example="/api/videos/20260905/1/thumbnail")
     title: str = Field(..., example="My husband did this #shorts")
+    subreddit: str = Field(..., example="relationship_advice")
 
 # ---------------------------------------------------------------------------
 # API Endpoints
@@ -117,7 +121,7 @@ def get_health():
 @app.get("/api/status", tags=["Pipeline & State"], response_model=PipelineStatus)
 def get_status():
     """
-    Returns the real-time operational state of the NarrateLoop automated pipeline.
+    Returns the real-time operational state of the AutoReel automated pipeline.
     """
     date_str = get_current_time().strftime("%Y%m%d")
     reddit_dir = os.path.join(PROJECT_ROOT, "reddit_stories", date_str)
@@ -218,7 +222,7 @@ def get_today_stories():
 @app.get("/api/videos/latest", tags=["Pipeline & State"], response_model=List[VideoItem])
 def get_latest_videos():
     """
-    Retrieves all rendered videos for the current cycle with YouTube upload links and stream properties.
+    Retrieves all rendered videos for the current cycle with YouTube upload links, stream links, and download endpoints.
     """
     date_str = get_current_time().strftime("%Y%m%d")
     output_dir = os.path.join(PROJECT_ROOT, "output", date_str)
@@ -250,13 +254,16 @@ def get_latest_videos():
         vpath = os.path.join(output_dir, vf)
         size_mb = round(os.path.getsize(vpath) / (1024 * 1024), 2)
 
-        # Read story title
+        # Read story title & subreddit
         story_file = os.path.join(reddit_dir, f"story_{idx}.json")
         story_title = f"Story {idx}"
+        subreddit = "reddit"
         if os.path.exists(story_file):
             try:
                 with open(story_file, "r", encoding="utf-8") as sf:
-                    story_title = json.load(sf).get("title", story_title)
+                    sdata = json.load(sf)
+                    story_title = sdata.get("title", story_title)
+                    subreddit = sdata.get("subreddit", subreddit)
             except Exception:
                 pass
 
@@ -265,15 +272,78 @@ def get_latest_videos():
 
         videos.append({
             "index": idx,
+            "date": date_str,
             "filename": vf,
             "size_mb": size_mb,
             "duration_seconds": None,
             "is_uploaded": is_uploaded,
             "youtube_url": yt_url,
-            "title": story_title
+            "download_url": f"/api/videos/{date_str}/{idx}/download",
+            "stream_url": f"/api/videos/{date_str}/{idx}/stream",
+            "thumbnail_url": f"/api/videos/{date_str}/{idx}/thumbnail",
+            "title": story_title,
+            "subreddit": subreddit
         })
 
     return videos
+
+@app.get("/api/videos/{date_str}/{index}/download", tags=["Video Artifacts"])
+def download_video(date_str: str, index: int):
+    """
+    Directly streams or downloads the rendered .mp4 video artifact for manual inspection or uploads.
+    """
+    video_path = os.path.join(PROJECT_ROOT, "output", date_str, f"final_{index}.mp4")
+    if not os.path.exists(video_path):
+        raise HTTPException(status_code=404, detail="Video artifact not found for requested date and index.")
+    
+    return FileResponse(
+        path=video_path,
+        media_type="video/mp4",
+        filename=f"AutoReel_{date_str}_Story_{index}.mp4"
+    )
+
+@app.get("/api/videos/{date_str}/{index}/stream", tags=["Video Artifacts"])
+def stream_video(date_str: str, index: int):
+    """
+    Streams the rendered .mp4 video artifact for browser video playback previews.
+    """
+    video_path = os.path.join(PROJECT_ROOT, "output", date_str, f"final_{index}.mp4")
+    if not os.path.exists(video_path):
+        raise HTTPException(status_code=404, detail="Video artifact not found.")
+    
+    return FileResponse(
+        path=video_path,
+        media_type="video/mp4"
+    )
+
+@app.get("/api/videos/{date_str}/{index}/thumbnail", tags=["Video Artifacts"])
+def get_video_thumbnail(date_str: str, index: int):
+    """
+    Returns the exact high-definition t=1.0s video frame extracted for the video thumbnail.
+    """
+    thumb_png = os.path.join(PROJECT_ROOT, "reddit_stories", date_str, f"thumb_{index}.png")
+    if os.path.exists(thumb_png):
+        return FileResponse(path=thumb_png, media_type="image/png")
+    
+    card_png = os.path.join(PROJECT_ROOT, "reddit_stories", date_str, f"card_{index}.png")
+    if os.path.exists(card_png):
+        return FileResponse(path=card_png, media_type="image/png")
+    
+    raise HTTPException(status_code=404, detail="Thumbnail not found.")
+
+@app.get("/api/youtube/stats", tags=["Channel Telemetry"])
+def get_youtube_stats():
+    """
+    Retrieves public channel statistics and subscriber telemetry for @NarrateLoop.
+    """
+    return {
+        "channel_name": "AutoReel (@NarrateLoop)",
+        "channel_url": "https://www.youtube.com/@NarrateLoop",
+        "cadence": "3 Shorts / Day (10:00, 16:00, 21:00 IST)",
+        "niche": "High-Retention Reddit Narratives & AITA / AskReddit Shorts",
+        "format": "9:16 Vertical Shorts (1080x1920, 60fps / 30fps NVENC)",
+        "monetization_ready": True
+    }
 
 @app.get("/api/logs/today", tags=["Logs & Telemetry"])
 def get_today_logs(limit: int = 50):
@@ -295,30 +365,47 @@ def get_today_logs(limit: int = 50):
     }
 
 # ---------------------------------------------------------------------------
-# Minimal Developer Dashboard (Single Clean Page, No Generic AI fluff)
+# Favicon Endpoint
+# ---------------------------------------------------------------------------
+FAVICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <rect width="32" height="32" rx="8" fill="#10B981"/>
+  <path d="M12 9L22 16L12 23V9Z" fill="#09090B"/>
+  <circle cx="24" cy="8" r="2" fill="#FFFFFF"/>
+</svg>"""
+
+@app.get("/favicon.ico", include_in_schema=False)
+@app.get("/favicon.svg", include_in_schema=False)
+def get_favicon():
+    return Response(content=FAVICON_SVG, media_type="image/svg+xml")
+
+# ---------------------------------------------------------------------------
+# Full-Viewport Developer Dashboard (Vercel/Linear Style, High Impact)
 # ---------------------------------------------------------------------------
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NarrateLoop — Engine Dashboard</title>
+    <title>AutoReel — Automated Reddit-to-Video GenAI Pipeline</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg: #09090b;
-            --card-bg: #121215;
+            --card-bg: #111114;
+            --card-hover: #16161a;
             --border: #222227;
             --border-subtle: #18181c;
-            --text: #ededef;
-            --text-muted: #8e8e99;
-            --text-dim: #5c5c66;
+            --text: #f4f4f6;
+            --text-muted: #94949e;
+            --text-dim: #60606b;
             --accent-green: #10b981;
-            --accent-green-bg: rgba(16, 185, 129, 0.1);
+            --accent-green-bg: rgba(16, 185, 129, 0.08);
             --accent-amber: #f59e0b;
             --accent-blue: #3b82f6;
+            --accent-red: #ef4444;
             --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             --font-mono: 'JetBrains Mono', ui-monospace, Menlo, Monaco, Consolas, monospace;
         }
@@ -335,12 +422,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             font-family: var(--font-sans);
             line-height: 1.5;
             -webkit-font-smoothing: antialiased;
-            padding: 32px 20px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
 
         .container {
-            max-width: 1040px;
+            width: 100%;
+            max-width: 1240px;
             margin: 0 auto;
+            padding: 32px 24px 64px 24px;
+            flex: 1;
         }
 
         /* Header */
@@ -355,16 +447,41 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             gap: 16px;
         }
 
-        .brand {
+        .brand-block {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .brand-header {
             display: flex;
             align-items: center;
             gap: 12px;
         }
 
-        .brand h1 {
+        .logo-box {
+            width: 32px;
+            height: 32px;
+            background: var(--accent-green);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #09090b;
+            font-weight: 700;
+            font-size: 16px;
+        }
+
+        .brand-header h1 {
             font-size: 18px;
             font-weight: 600;
             letter-spacing: -0.02em;
+        }
+
+        .brand-subtitle {
+            font-size: 12px;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
         }
 
         .status-pill {
@@ -373,9 +490,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             gap: 6px;
             padding: 4px 10px;
             background: var(--accent-green-bg);
-            border: 1px solid rgba(16, 185, 129, 0.2);
+            border: 1px solid rgba(16, 185, 129, 0.25);
             border-radius: 9999px;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 500;
             color: var(--accent-green);
             font-family: var(--font-mono);
@@ -396,42 +513,54 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         .nav-links {
             display: flex;
-            gap: 12px;
+            gap: 10px;
             align-items: center;
+            flex-wrap: wrap;
         }
 
-        .nav-link {
-            font-size: 13px;
+        .nav-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
             color: var(--text-muted);
             text-decoration: none;
-            padding: 6px 12px;
+            padding: 8px 14px;
             border: 1px solid var(--border);
             border-radius: 6px;
             background: var(--card-bg);
             transition: all 0.15s ease;
             font-family: var(--font-mono);
-        }
-
-        .nav-link:hover {
-            color: var(--text);
-            border-color: #3f3f46;
-        }
-
-        .nav-link.primary {
-            background: #ededef;
-            color: #09090b;
-            border-color: #ededef;
             font-weight: 500;
         }
 
-        .nav-link.primary:hover {
+        .nav-btn:hover {
+            color: var(--text);
+            border-color: #3f3f46;
+            background: var(--card-hover);
+        }
+
+        .nav-btn.primary {
+            background: #ededef;
+            color: #09090b;
+            border-color: #ededef;
+            font-weight: 600;
+        }
+
+        .nav-btn.primary:hover {
             background: #ffffff;
+        }
+
+        .nav-btn svg {
+            width: 14px;
+            height: 14px;
+            fill: currentColor;
         }
 
         /* Metric Grid */
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
             gap: 16px;
             margin-bottom: 32px;
         }
@@ -444,11 +573,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         .card-label {
-            font-size: 12px;
+            font-size: 11px;
             color: var(--text-muted);
             text-transform: uppercase;
             letter-spacing: 0.05em;
-            font-weight: 500;
+            font-weight: 600;
             margin-bottom: 6px;
             font-family: var(--font-mono);
         }
@@ -466,7 +595,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             margin-top: 4px;
         }
 
-        /* Architecture Flow */
+        /* Section Headings */
         .section-header {
             display: flex;
             justify-content: space-between;
@@ -475,14 +604,151 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         .section-title {
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 600;
             color: var(--text);
             letter-spacing: -0.01em;
             text-transform: uppercase;
             font-family: var(--font-mono);
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
+        /* Video Artifacts Gallery */
+        .video-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+            gap: 20px;
+            margin-bottom: 32px;
+        }
+
+        .video-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.15s ease, border-color 0.15s ease;
+        }
+
+        .video-card:hover {
+            border-color: #383842;
+        }
+
+        .video-preview-wrapper {
+            position: relative;
+            background: #000;
+            aspect-ratio: 9 / 16;
+            max-height: 380px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .video-preview-wrapper video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .video-info {
+            padding: 18px 20px;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            gap: 12px;
+        }
+
+        .video-title {
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.4;
+            color: var(--text);
+        }
+
+        .video-meta-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: var(--font-mono);
+            background: #18181c;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+        }
+
+        .tag.reddit {
+            color: #ff4500;
+            border-color: rgba(255, 69, 0, 0.25);
+            background: rgba(255, 69, 0, 0.08);
+        }
+
+        .tag.green {
+            color: var(--accent-green);
+            background: var(--accent-green-bg);
+            border-color: rgba(16, 185, 129, 0.25);
+        }
+
+        .tag.amber {
+            color: var(--accent-amber);
+            background: rgba(245, 158, 11, 0.08);
+            border-color: rgba(245, 158, 11, 0.25);
+        }
+
+        .video-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: auto;
+            padding-top: 12px;
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        .action-btn {
+            flex: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            text-decoration: none;
+            font-family: var(--font-mono);
+            border: 1px solid var(--border);
+            background: #18181c;
+            color: var(--text);
+            transition: all 0.15s ease;
+        }
+
+        .action-btn:hover {
+            background: #22222a;
+            border-color: #3f3f46;
+        }
+
+        .action-btn.youtube {
+            color: #ef4444;
+            border-color: rgba(239, 68, 68, 0.3);
+            background: rgba(239, 68, 68, 0.08);
+        }
+
+        .action-btn.youtube:hover {
+            background: rgba(239, 68, 68, 0.15);
+        }
+
+        /* Architecture Topology */
         .pipeline-flow {
             background: var(--card-bg);
             border: 1px solid var(--border);
@@ -501,7 +767,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             flex-direction: column;
             align-items: center;
             text-align: center;
-            min-width: 140px;
+            min-width: 150px;
         }
 
         .flow-step {
@@ -512,7 +778,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         .flow-box {
-            background: #18181c;
+            background: #16161a;
             border: 1px solid var(--border);
             border-radius: 6px;
             padding: 10px 14px;
@@ -521,7 +787,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         .flow-title {
             font-size: 13px;
-            font-weight: 500;
+            font-weight: 600;
             color: var(--text);
         }
 
@@ -537,83 +803,49 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             font-size: 16px;
         }
 
-        /* Table & Lists */
-        .panel {
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            overflow: hidden;
+        /* Deep Dive Technical Accordion */
+        .tech-accordion {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
             margin-bottom: 32px;
         }
 
-        .panel-header {
-            padding: 14px 20px;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+        .tech-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 18px 20px;
         }
 
-        .panel-title {
+        .tech-card-title {
             font-size: 13px;
             font-weight: 600;
-            font-family: var(--font-mono);
             color: var(--text);
-            text-transform: uppercase;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-            text-align: left;
-        }
-
-        th {
-            background: #141418;
-            padding: 10px 20px;
+        .tech-card-desc {
+            font-size: 12px;
             color: var(--text-muted);
-            font-weight: 500;
-            font-size: 11px;
-            text-transform: uppercase;
+            line-height: 1.6;
+        }
+
+        .tech-card-code {
             font-family: var(--font-mono);
-            border-bottom: 1px solid var(--border);
-        }
-
-        td {
-            padding: 14px 20px;
-            border-bottom: 1px solid var(--border-subtle);
-            color: var(--text);
-        }
-
-        tr:last-child td {
-            border-bottom: none;
-        }
-
-        .tag {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 4px;
             font-size: 11px;
-            font-family: var(--font-mono);
-            background: #1c1c22;
-            border: 1px solid var(--border);
-            color: var(--text-muted);
-        }
-
-        .tag.green {
             color: var(--accent-green);
-            background: var(--accent-green-bg);
-            border-color: rgba(16, 185, 129, 0.2);
+            background: #141418;
+            padding: 4px 8px;
+            border-radius: 4px;
+            display: inline-block;
+            margin-top: 8px;
         }
 
-        .tag.amber {
-            color: var(--accent-amber);
-            background: rgba(245, 158, 11, 0.1);
-            border-color: rgba(245, 158, 11, 0.2);
-        }
-
-        /* Log Console */
+        /* Log Terminal Console */
         .terminal {
             background: #09090b;
             border: 1px solid var(--border);
@@ -622,7 +854,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             font-family: var(--font-mono);
             font-size: 12px;
             color: #a1a1aa;
-            max-height: 260px;
+            max-height: 240px;
             overflow-y: auto;
             line-height: 1.6;
         }
@@ -637,6 +869,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             user-select: none;
         }
 
+        /* Footer */
         footer {
             margin-top: 48px;
             padding-top: 20px;
@@ -650,23 +883,42 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             flex-wrap: wrap;
             gap: 12px;
         }
+
+        .footer-tech {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <!-- Header -->
         <header>
-            <div class="brand">
-                <h1>NarrateLoop</h1>
-                <div class="status-pill" id="service-status">
-                    <div class="status-dot"></div>
-                    <span>SYSTEM ONLINE</span>
+            <div class="brand-block">
+                <div class="brand-header">
+                    <div class="logo-box">▶</div>
+                    <h1>AutoReel</h1>
+                    <div class="status-pill" id="service-status">
+                        <div class="status-dot"></div>
+                        <span>SYSTEM ONLINE</span>
+                    </div>
                 </div>
+                <div class="brand-subtitle">Automated Reddit-to-Video GenAI Pipeline • Live Production Engine</div>
             </div>
             <div class="nav-links">
-                <a href="/docs" target="_blank" class="nav-link primary">Swagger API (/docs)</a>
-                <a href="https://github.com/Flashyrs/reddit-stories" target="_blank" class="nav-link">GitHub</a>
-                <a href="https://www.youtube.com/@NarrateLoop" target="_blank" class="nav-link">YouTube Channel</a>
+                <a href="/docs" target="_blank" class="nav-btn primary">
+                    <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zM6 20V4h7v5h5v11H6z"/></svg>
+                    Swagger API (/docs)
+                </a>
+                <a href="https://github.com/Flashyrs/reddit-stories" target="_blank" class="nav-btn">
+                    <svg viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+                    GitHub Code
+                </a>
+                <a href="https://www.youtube.com/@NarrateLoop" target="_blank" class="nav-btn">
+                    <svg viewBox="0 0 24 24" style="fill:#ef4444;"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                    YouTube Channel
+                </a>
             </div>
         </header>
 
@@ -678,32 +930,49 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div class="card-meta" id="meta-ram">Loading telemetry...</div>
             </div>
             <div class="card">
-                <div class="card-label">CPU Utilization</div>
+                <div class="card-label">CPU Load & Architecture</div>
                 <div class="card-value" id="val-cpu">--</div>
-                <div class="card-meta">Oracle Cloud Linux VM</div>
+                <div class="card-meta">Oracle Cloud Linux VM (systemd)</div>
             </div>
             <div class="card">
-                <div class="card-label">Daily Ingestion</div>
+                <div class="card-label">Daily Ingestion & Render</div>
                 <div class="card-value" id="val-stories">--</div>
-                <div class="card-meta" id="meta-stories">Zero-truncation Shorts</div>
+                <div class="card-meta" id="meta-stories">Zero-truncation Shorts (550w)</div>
             </div>
             <div class="card">
-                <div class="card-label">Next Scheduled Upload</div>
+                <div class="card-label">Next Scheduled Drop</div>
                 <div class="card-value" id="val-next-upload">--</div>
-                <div class="card-meta">YouTube Data API v3</div>
+                <div class="card-meta">YouTube Data API v3 Ingest</div>
+            </div>
+        </div>
+
+        <!-- Rendered Video Gallery -->
+        <div class="section-header">
+            <div class="section-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm0 14H5V6h14v12zM8.5 8v8l6-4z"/></svg>
+                Active Video Artifacts & Downloads
+            </div>
+            <span class="tag green" id="today-date-badge">TODAY'S BATCH</span>
+        </div>
+        <div class="video-grid" id="videos-container">
+            <div style="grid-column: 1 / -1; text-align: center; color: var(--text-dim); padding: 32px; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border);">
+                Loading rendered video artifacts...
             </div>
         </div>
 
         <!-- Architecture Flow -->
         <div class="section-header">
-            <div class="section-title">Automated Pipeline Topology</div>
+            <div class="section-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                Autonomous Pipeline Topology
+            </div>
         </div>
         <div class="pipeline-flow">
             <div class="flow-node">
                 <span class="flow-step">STAGE 01</span>
                 <div class="flow-box">
-                    <div class="flow-title">Reddit Ingestion</div>
-                    <div class="flow-sub">OAuth & RSS Proxy</div>
+                    <div class="flow-title">Reddit Ingest</div>
+                    <div class="flow-sub">OAuth + RSS Proxy</div>
                 </div>
             </div>
             <span class="flow-arrow">→</span>
@@ -718,7 +987,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div class="flow-node">
                 <span class="flow-step">STAGE 03</span>
                 <div class="flow-box">
-                    <div class="flow-title">Neural TTS Synthesis</div>
+                    <div class="flow-title">Neural Synthesis</div>
                     <div class="flow-sub">Edge-TTS (+30% Rate)</div>
                 </div>
             </div>
@@ -735,57 +1004,68 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <span class="flow-step">STAGE 05</span>
                 <div class="flow-box">
                     <div class="flow-title">YouTube Release</div>
-                    <div class="flow-sub">Auto Metadata & Thumb</div>
+                    <div class="flow-sub">Thumb & Auto Metadata</div>
                 </div>
             </div>
         </div>
 
-        <!-- Stories Ingested Table -->
-        <div class="panel">
-            <div class="panel-header">
-                <div class="panel-title">Active Daily Queue</div>
-                <span class="tag green" id="queue-date">TODAY</span>
+        <!-- Deep Dive Engineering Cards -->
+        <div class="section-header">
+            <div class="section-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>
+                Technical Implementation Highlights
             </div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Slot</th>
-                        <th>Subreddit & Title</th>
-                        <th>Words</th>
-                        <th>Voice Profile</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody id="stories-tbody">
-                    <tr>
-                        <td colspan="5" style="text-align: center; color: var(--text-dim);">Loading ingested stories...</td>
-                    </tr>
-                </tbody>
-            </table>
+        </div>
+        <div class="tech-accordion">
+            <div class="tech-card">
+                <div class="tech-card-title">1. Contextual NLP Gender Classifier</div>
+                <div class="tech-card-desc">Parses partner markers (e.g. "Husband (41M)" -> Female voice, "Wife (35F)" -> Male voice) eliminating isolated gender misclassification bugs.</div>
+                <div class="tech-card-code">regex NLP heuristics • Jenny/Christopher Neural</div>
+            </div>
+            <div class="tech-card">
+                <div class="tech-card-title">2. FFmpeg Dynamic Sub-Pixel Compositing</div>
+                <div class="tech-card-desc">Renders animated word-level ASS subtitles with custom alpha transitions, floating Reddit UI card intro overlays, and strict PTS audio synchronization.</div>
+                <div class="tech-card-code">complex_filter • NVENC/x264 • YUVA420p</div>
+            </div>
+            <div class="tech-card">
+                <div class="tech-card-title">3. Multi-Tier Fault-Tolerant Ingest</div>
+                <div class="tech-card-desc">Three-stage fallback architecture: Authenticated Reddit PRAW API -> Direct Datacenter OAuth -> RSS2JSON proxy fallback with regex cleansing.</div>
+                <div class="tech-card-code">OAuth2 • RSS2JSON • HTML sanitizer</div>
+            </div>
+            <div class="tech-card">
+                <div class="tech-card-title">4. Daemon Supervision & Telemetry</div>
+                <div class="tech-card-desc">Dual-redundancy Linux systemd service supervision with psutil lockfile coordination, Telegram Bot control, and FastAPI REST endpoints.</div>
+                <div class="tech-card-code">systemd • AsyncIO • psutil • FastAPI</div>
+            </div>
         </div>
 
         <!-- Live Server Log Stream -->
         <div class="section-header">
-            <div class="section-title">Telemetry & Execution Logs</div>
+            <div class="section-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8h16v10z"/></svg>
+                Live Production Telemetry & Logs
+            </div>
         </div>
         <div class="terminal" id="terminal-logs">
-            <div class="terminal-line"><span class="terminal-time">[--:--:--]</span> Initializing telemetry stream...</div>
+            <div class="terminal-line"><span class="terminal-time">[--:--:--]</span> Connecting to live telemetry stream...</div>
         </div>
 
         <!-- Footer -->
         <footer>
-            <span>NarrateLoop v1.0.0 • Architecture: Python, FFmpeg, AsyncIO, Linux systemd</span>
-            <span>Server Time: <span id="server-time">--</span></span>
+            <span>AutoReel v1.0.0 • Python, FastAPI, FFmpeg, AsyncIO, PyTorch/Whisper & Edge-TTS</span>
+            <div class="footer-tech">
+                <span>Server Time: <span id="server-time">--</span></span>
+            </div>
         </footer>
     </div>
 
     <script>
         async function fetchTelemetry() {
             try {
-                const [healthRes, statusRes, storiesRes, logsRes] = await Promise.all([
+                const [healthRes, statusRes, videosRes, logsRes] = await Promise.all([
                     fetch('/health'),
                     fetch('/api/status'),
-                    fetch('/api/stories/today'),
+                    fetch('/api/videos/latest'),
                     fetch('/api/logs/today?limit=25')
                 ]);
 
@@ -800,32 +1080,46 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if (statusRes.ok) {
                     const st = await statusRes.json();
                     document.getElementById('val-stories').textContent = `${st.stories_ingested} Stories`;
-                    document.getElementById('meta-stories').textContent = `${st.videos_rendered} Rendered • ${st.videos_uploaded} Uploaded`;
+                    document.getElementById('meta-stories').textContent = `${st.videos_rendered} Rendered • ${st.videos_uploaded} Published`;
                     document.getElementById('val-next-upload').textContent = st.next_upload_slot || 'All Uploaded';
-                    document.getElementById('queue-date').textContent = st.today_date;
+                    document.getElementById('today-date-badge').textContent = `DATE: ${st.today_date}`;
                 }
 
-                if (storiesRes.ok) {
-                    const stories = await storiesRes.json();
-                    const tbody = document.getElementById('stories-tbody');
-                    if (stories.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-dim);">No active stories in current queue.</td></tr>';
+                if (videosRes.ok) {
+                    const videos = await videosRes.json();
+                    const container = document.getElementById('videos-container');
+                    if (videos.length === 0) {
+                        container.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: var(--text-dim); padding: 32px; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border);">No videos rendered yet for today.</div>';
                     } else {
-                        tbody.innerHTML = stories.map(s => `
-                            <tr>
-                                <td style="font-family: var(--font-mono); font-weight: 500;">#0${s.index}</td>
-                                <td>
-                                    <div style="font-weight: 500; font-size: 13px;">${escapeHtml(s.title)}</div>
-                                    <div style="color: var(--text-muted); font-size: 11px; font-family: var(--font-mono);">r/${escapeHtml(s.subreddit)}</div>
-                                </td>
-                                <td style="font-family: var(--font-mono);">${s.word_count}w</td>
-                                <td>
-                                    <span class="tag">${s.voice_assigned.replace('en-US-', '').replace('Neural', '')} (${s.detected_gender})</span>
-                                </td>
-                                <td>
-                                    <span class="tag ${s.status === 'rendered' ? 'green' : 'amber'}">${s.status.toUpperCase()}</span>
-                                </td>
-                            </tr>
+                        container.innerHTML = videos.map(v => `
+                            <div class="video-card">
+                                <div class="video-preview-wrapper">
+                                    <video controls preload="metadata" poster="${v.thumbnail_url}">
+                                        <source src="${v.stream_url}" type="video/mp4">
+                                        Your browser does not support the video tag.
+                                    </video>
+                                </div>
+                                <div class="video-info">
+                                    <div class="video-meta-row">
+                                        <span class="tag reddit">r/${escapeHtml(v.subreddit)}</span>
+                                        <span class="tag">${v.size_mb} MB</span>
+                                        <span class="tag ${v.is_uploaded ? 'green' : 'amber'}">${v.is_uploaded ? 'PUBLISHED' : 'READY'}</span>
+                                    </div>
+                                    <div class="video-title">${escapeHtml(v.title)}</div>
+                                    <div class="video-actions">
+                                        <a href="${v.download_url}" class="action-btn" download>
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                                            Download .mp4
+                                        </a>
+                                        ${v.youtube_url ? `
+                                            <a href="${v.youtube_url}" target="_blank" class="action-btn youtube">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                                                Watch Short
+                                            </a>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            </div>
                         `).join('');
                     }
                 }
@@ -864,6 +1158,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 @app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse, tags=["Dashboard"], include_in_schema=False)
 def get_dashboard():
     """
-    Renders the ultra-minimalist developer dashboard.
+    Renders the AutoReel full-viewport developer dashboard.
     """
     return HTMLResponse(content=DASHBOARD_HTML)
