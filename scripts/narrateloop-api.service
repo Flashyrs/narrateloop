@@ -1,0 +1,15 @@
+[Unit]
+Description=NarrateLoop FastAPI Engine & Documentation Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/narrateloop
+ExecStart=/home/ubuntu/narrateloop/.venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

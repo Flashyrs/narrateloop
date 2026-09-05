@@ -54,11 +54,24 @@ def log(message, date_str=None, telegram=False, tts_progress=False):
             f.write(full_message + "\n")
 
     if telegram:
-        keywords = ["error", "uploaded", "uploading", "generating", "final video not found",
-                    "processing stopped", "already uploaded", "cleanup", "deleted"]
-        lower_msg = message.lower()
-        if any(k in lower_msg for k in keywords) or tts_progress:
-            send_telegram_log(full_message if tts_progress else f"⚠️ {full_message}")
+        if tts_progress:
+            send_telegram_log(full_message, tts_progress=True)
+        else:
+            lower_msg = message.lower()
+            if "error" in lower_msg or "failed" in lower_msg or "aborting" in lower_msg:
+                send_telegram_log(f"❌ {full_message}")
+            elif "warn" in lower_msg or "warning" in lower_msg:
+                send_telegram_log(f"⚠️ {full_message}")
+            elif "uploaded" in lower_msg:
+                send_telegram_log(f"✅ {full_message}")
+            elif "rendering" in lower_msg or "generating" in lower_msg:
+                send_telegram_log(f"🎬 {full_message}")
+            elif "fetching" in lower_msg:
+                send_telegram_log(f"🌐 {full_message}")
+            elif any(k in lower_msg for k in ["cleanup", "deleted", "stopped", "startup"]):
+                send_telegram_log(f"ℹ️ {full_message}")
+            else:
+                send_telegram_log(full_message)
 
 def get_story_files(folder_path):
     files = [f for f in os.listdir(folder_path) if f.startswith("story_") and f.endswith(".json")]
