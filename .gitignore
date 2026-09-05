@@ -38,3 +38,6 @@ requirements-cloud.txt
 .idea/
 .vscode/
 working.md
+PORTFOLIO_AND_MONETIZATION_PLAN.md
+*.md
+!README.md
