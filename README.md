@@ -144,7 +144,7 @@ AutoReel/
 > **NarrateLoop — Autonomous Reddit-to-Video GenAI Pipeline**  
 > *Python • FastAPI • FFmpeg (NVENC) • PyTorch • Whisper • Bark • SQLite • Linux (systemd) • Oracle Cloud*  
 > * [Live Dashboard & Swagger Docs: https://narrateloop.duckdns.org/docs]  
-> * [GitHub Repository: https://github.com/Flashyrs/reddit-stories]  
+> * [GitHub Repository: https://github.com/Flashyrs/narrateloop]  
 >
 > * **Built a 24/7 autonomous multimodal GenAI pipeline** deployed on Oracle Cloud, orchestrating Reddit content extraction, Gemini NLP metadata cleansing, neural speech synthesis (+30% pacing), and automated YouTube distribution with zero human intervention.
 > * **Implemented GPU-accelerated video rendering via FFmpeg NVENC** with sub-pixel overlay placement, dynamic alpha transitions, and dynamic ASS/SSA word-synchronized subtitle highlighting across 100+ production renders.
