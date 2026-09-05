@@ -365,16 +365,31 @@ def get_today_logs(limit: int = 50):
     }
 
 # ---------------------------------------------------------------------------
-# Favicon Endpoint
+# Logo & Favicon Endpoints
 # ---------------------------------------------------------------------------
 FAVICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
   <rect width="32" height="32" rx="8" fill="#09090B"/>
   <circle cx="16" cy="16" r="6" fill="#10B981"/>
 </svg>"""
 
+def find_logo_image():
+    for fname in ["website-img.jpg", "website-img.png", "website-img.jpeg", "website-img.webp", "webpsite-img.jpg", "webpsite-img.png"]:
+        p = os.path.join(PROJECT_ROOT, fname)
+        if os.path.exists(p):
+            return p
+    return None
+
+@app.get("/api/logo", include_in_schema=False)
 @app.get("/favicon.ico", include_in_schema=False)
 @app.get("/favicon.svg", include_in_schema=False)
-def get_favicon():
+@app.get("/favicon.png", include_in_schema=False)
+@app.get("/favicon.jpg", include_in_schema=False)
+def get_favicon_or_logo():
+    logo_path = find_logo_image()
+    if logo_path and os.path.exists(logo_path):
+        ext = Path(logo_path).suffix.lower()
+        mime = "image/jpeg" if ext in [".jpg", ".jpeg"] else ("image/png" if ext == ".png" else "image/webp")
+        return FileResponse(path=logo_path, media_type=mime)
     return Response(content=FAVICON_SVG, media_type="image/svg+xml")
 
 # ---------------------------------------------------------------------------
@@ -385,8 +400,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NarrateLoop — Autonomous Reddit-to-Video GenAI Pipeline</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <title>NarrateLoop</title>
+    <link rel="icon" href="/favicon.ico">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -456,6 +471,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             display: flex;
             align-items: center;
             gap: 12px;
+        }
+
+        .brand-logo {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            object-fit: cover;
+            border: 1px solid var(--border);
         }
 
         .brand-header h1 {
@@ -883,6 +906,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <header>
             <div class="brand-block">
                 <div class="brand-header">
+                    <img src="/api/logo" alt="NarrateLoop" class="brand-logo" onerror="this.style.display='none'">
                     <h1>NarrateLoop</h1>
                     <div class="status-pill" id="service-status">
                         <div class="status-dot"></div>

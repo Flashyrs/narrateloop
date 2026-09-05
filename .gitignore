@@ -28,10 +28,13 @@ venv/
 
 # Temporary & scratch files
 nltk_data/
+nltk_setup.py
 changes.txt
 startup_debug.log
 test.py
 requirements-cloud.txt
+website-img*
+webpsite-img*
 
 # Editor & OS files
 .DS_Store
