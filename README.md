@@ -137,20 +137,6 @@ AutoReel/
 * `GET /api/videos/{date}/{index}/download` — Direct `.mp4` video artifact download.
 * `GET /api/logs/today` — Live server execution logs stream.
 
----
-
-## 📜 Resume Bullet Points (FAANG SDE-1 / Software Engineer)
-
-> **NarrateLoop — Autonomous Reddit-to-Video GenAI Pipeline**  
-> *Python • FastAPI • FFmpeg (NVENC) • PyTorch • Whisper • Bark • SQLite • Linux (systemd) • Oracle Cloud*  
-> * [Live Dashboard & Swagger Docs: https://narrateloop.duckdns.org/docs]  
-> * [GitHub Repository: https://github.com/Flashyrs/narrateloop]  
->
-> * **Built a 24/7 autonomous multimodal GenAI pipeline** deployed on Oracle Cloud, orchestrating Reddit content extraction, Gemini NLP metadata cleansing, neural speech synthesis (+30% pacing), and automated YouTube distribution with zero human intervention.
-> * **Implemented GPU-accelerated video rendering via FFmpeg NVENC** with sub-pixel overlay placement, dynamic alpha transitions, and dynamic ASS/SSA word-synchronized subtitle highlighting across 100+ production renders.
-> * **Engineered speech synthesis & alignment systems** leveraging Suno Bark, Edge-TTS, and Whisper word-level alignment with GPUtil VRAM monitoring and automated CPU fallback on CUDA OOM.
-> * **Designed fault-tolerant ingest pipelines** featuring 3-tier fallback (PRAW OAuth to direct datacenter tokens to RSS proxies) and dual-redundancy Linux `systemd` supervision with `psutil` concurrency coordination.
-> * **Developed a high-performance FastAPI telemetry service** exposing interactive Swagger `/docs`, video artifact streaming/download endpoints, and automated Let's Encrypt SSL reverse-proxied through Nginx.
 
 ---
 
