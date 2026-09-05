@@ -29,9 +29,9 @@ def get_current_time():
 # FastAPI Application Definition
 # ---------------------------------------------------------------------------
 app = FastAPI(
-    title="AutoReel : Automated Reddit-to-Video GenAI Pipeline",
+    title="NarrateLoop : Autonomous Reddit-to-Video GenAI Pipeline",
     description="""
-### AutoReel — Distributed Multimodal Media & Content Ingestion Engine
+### NarrateLoop — Distributed Multimodal Media & Content Ingestion Engine
 High-throughput autonomous backend orchestrating Reddit content extraction, contextual NLP gender classification, neural audio synthesis (+30% pacing), dynamic FFmpeg sub-pixel video rendering, and multi-tier YouTube distribution.
     """,
     version="1.0.0",
@@ -299,7 +299,7 @@ def download_video(date_str: str, index: int):
     return FileResponse(
         path=video_path,
         media_type="video/mp4",
-        filename=f"AutoReel_{date_str}_Story_{index}.mp4"
+        filename=f"NarrateLoop_{date_str}_Story_{index}.mp4"
     )
 
 @app.get("/api/videos/{date_str}/{index}/stream", tags=["Video Artifacts"])
@@ -337,7 +337,7 @@ def get_youtube_stats():
     Retrieves public channel statistics and subscriber telemetry for @NarrateLoop.
     """
     return {
-        "channel_name": "AutoReel (@NarrateLoop)",
+        "channel_name": "@NarrateLoop",
         "channel_url": "https://www.youtube.com/@NarrateLoop",
         "cadence": "3 Shorts / Day (10:00, 16:00, 21:00 IST)",
         "niche": "High-Retention Reddit Narratives & AITA / AskReddit Shorts",
@@ -385,7 +385,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AutoReel — Automated Reddit-to-Video GenAI Pipeline</title>
+    <title>NarrateLoop — Autonomous Reddit-to-Video GenAI Pipeline</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -883,13 +883,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <header>
             <div class="brand-block">
                 <div class="brand-header">
-                    <h1>AutoReel</h1>
+                    <h1>NarrateLoop</h1>
                     <div class="status-pill" id="service-status">
                         <div class="status-dot"></div>
                         <span>SYSTEM ONLINE</span>
                     </div>
                 </div>
-                <div class="brand-subtitle">Automated Reddit-to-Video GenAI Pipeline • Live Production Engine</div>
+                <div class="brand-subtitle">Autonomous Reddit-to-Video GenAI Pipeline • Live Production Engine</div>
             </div>
             <div class="nav-links">
                 <a href="/docs" target="_blank" class="nav-btn primary">
@@ -1037,7 +1037,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         <!-- Footer -->
         <footer>
-            <span>AutoReel v1.0.0 • Python, FastAPI, FFmpeg, AsyncIO, PyTorch/Whisper & Edge-TTS</span>
+            <span>NarrateLoop v1.0.0 • Python, FastAPI, FFmpeg, AsyncIO, PyTorch/Whisper & Edge-TTS</span>
             <div class="footer-tech">
                 <span>Server Time: <span id="server-time">--</span></span>
             </div>

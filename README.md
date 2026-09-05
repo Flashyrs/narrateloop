@@ -1,4 +1,4 @@
-# 🎬 AutoReel : Automated Reddit-to-Video GenAI Pipeline
+# 🎬 NarrateLoop : Autonomous Reddit-to-Video GenAI Pipeline
 
 [![Live Dashboard](https://img.shields.io/badge/Live_Dashboard-https%3A%2F%2Fnarrateloop.duckdns.org-10b981?style=for-the-badge&logo=fastapi)](https://narrateloop.duckdns.org)
 [![Interactive API Docs](https://img.shields.io/badge/Swagger_OpenAPI-%2Fdocs-3b82f6?style=for-the-badge&logo=swagger)](https://narrateloop.duckdns.org/docs)
@@ -6,7 +6,7 @@
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![FFmpeg NVENC](https://img.shields.io/badge/FFmpeg-GPU_NVENC-007808?style=for-the-badge&logo=ffmpeg&logoColor=white)](https://ffmpeg.org)
 
-**AutoReel** is an autonomous, high-throughput media generation and distributed content ingestion engine. It transforms raw text stories from Reddit into viral, high-retention 9:16 vertical YouTube Shorts and 16:9 videos using contextual NLP gender classification, neural audio synthesis (+30% pacing), word-level dynamic ASS subtitle overlays, GPU-accelerated FFmpeg compositing, and automated multi-tier YouTube distribution.
+**NarrateLoop** is an autonomous, high-throughput media generation and distributed content ingestion engine. It transforms raw text stories from Reddit into viral, high-retention 9:16 vertical YouTube Shorts and 16:9 videos using contextual NLP gender classification, neural audio synthesis (+30% pacing), word-level dynamic ASS subtitle overlays, GPU-accelerated FFmpeg compositing, and automated multi-tier YouTube distribution.
 
 Deployed 24/7 on an **Oracle Cloud Linux VM** with dual-redundancy `systemd` process supervision, SQLite asset tracking, and real-time Telegram remote telemetry.
 
@@ -141,7 +141,7 @@ AutoReel/
 
 ## 📜 Resume Bullet Points (FAANG SDE-1 / Software Engineer)
 
-> **AutoReel — Automated Reddit-to-Video GenAI Pipeline**  
+> **NarrateLoop — Autonomous Reddit-to-Video GenAI Pipeline**  
 > *Python • FastAPI • FFmpeg (NVENC) • PyTorch • Whisper • Bark • SQLite • Linux (systemd) • Oracle Cloud*  
 > * [Live Dashboard & Swagger Docs: https://narrateloop.duckdns.org/docs]  
 > * [GitHub Repository: https://github.com/Flashyrs/reddit-stories]  
