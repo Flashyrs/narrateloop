@@ -12,10 +12,11 @@ This document outlines the strategic roadmap for:
 Rather than describing this as an "AI wrapper", position it as a **Distributed Multimodal Streaming & Automation Engine**:
 
 > **NarrateLoop – Autonomous Multimodal Content & Media Pipeline**  
-> *Stack: Python, FFmpeg, AsyncIO, Google Gemini NLP, Neural TTS, Linux (Systemd), OCI, YouTube Data API v3*  
-> * [Live Channel: YouTube @NarrateLoop]
-> * [GitHub Repository: github.com/Flashyrs/reddit-stories]
-> * [Interactive API Documentation: /docs (Swagger UI)]
+> *Stack: Python, FastAPI, FFmpeg, AsyncIO, Google Gemini NLP, Neural TTS, Linux (Systemd), OCI, YouTube Data API v3*  
+> * [Live Dashboard: https://narrateloop.duckdns.org]
+> * [Interactive API Docs: https://narrateloop.duckdns.org/docs]
+> * [GitHub Repository: https://github.com/Flashyrs/reddit-stories]
+> * [YouTube Channel: https://youtube.com/@NarrateLoop]
 
 #### FAANG-Targeted Bullet Points:
 * **Engineered a 24/7 autonomous media generation and ingestion pipeline** deployed on an Oracle Cloud Linux VM, orchestrating LLM text extraction, neural audio synthesis, and automated YouTube distribution with zero human intervention.

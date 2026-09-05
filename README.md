@@ -1,6 +1,10 @@
-# 🎬 Reddit-to-YouTube Automation Pipeline
+# 🎬 NarrateLoop — Autonomous Multimodal Content & Media Pipeline
 
-An end-to-end automated pipeline that converts Reddit stories into high-retention YouTube Videos and Shorts using AI voiceovers, dynamic subtitles, and gameplay backgrounds. Fully automated. Telegram-controlled. Built for scale.
+An end-to-end distributed backend pipeline that converts Reddit stories into high-retention YouTube Videos and Shorts using neural voiceovers, dynamic synchronized subtitles, and gameplay backgrounds. Fully automated, Telegram-controlled, and deployed 24/7 on Oracle Cloud.
+
+[![Live Dashboard](https://img.shields.io/badge/Live_Dashboard-https%3A%2F%2Fnarrateloop.duckdns.org-10b981?style=flat-square)](https://narrateloop.duckdns.org)
+[![Interactive API Docs](https://img.shields.io/badge/Swagger_OpenAPI-%2Fdocs-3b82f6?style=flat-square)](https://narrateloop.duckdns.org/docs)
+[![YouTube Channel](https://img.shields.io/badge/YouTube-%40NarrateLoop-red?style=flat-square&logo=youtube)](https://www.youtube.com/@NarrateLoop)
 
 ---
 
