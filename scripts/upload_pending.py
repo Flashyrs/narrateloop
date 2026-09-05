@@ -54,7 +54,8 @@ def upload_pending_video():
             story = json.load(f)
 
         title, description, tags = generate_title_and_description(story)
-        url = upload_video(video_path, title, description, tags=tags)
+        thumb_path = os.path.join(reddit_dir, f"thumb_{i}.png")
+        url = upload_video(video_path, title, description, tags=tags, thumbnail_path=thumb_path if os.path.exists(thumb_path) else None)
         with open(uploaded_log, "a") as f:
             f.write(f"{video_file} | {title} | {url}\n")
         return f"Uploaded {video_file}\n{url}"

@@ -59,7 +59,7 @@ CENSOR_WORDS = ["fuck", "shit", "bitch", "asshole", "dick", "bastard", "crap", "
 WORDS_PER_MINUTE = 150
 MAX_VIDEO_WORDS = 1500
 MIN_SHORT_WORDS = 100
-MAX_SHORT_WORDS = 450
+MAX_SHORT_WORDS = 550
 
 def strip_links_and_urls(text):
     """
@@ -94,9 +94,9 @@ def censor(text):
         text = replace_word(word)
     return text
 
-def trim_story_to_short(text, min_words=100, max_words=450):
+def trim_story_to_short(text, min_words=100, max_words=550):
     """
-    Trims a story cleanly at a sentence boundary if needed to fit YouTube Shorts (up to 3 minutes, ~450 words).
+    Trims a story cleanly at a sentence boundary if needed to fit YouTube Shorts (up to 3 minutes, ~550 words).
     Guarantees no sentence is cut off mid-word.
     """
     sentences = re.split(r'(?<=[.!?])\s+', text.strip())
@@ -355,11 +355,11 @@ def fetch_reddit_posts():
         # ----- SHORT STORIES (Complete standalone stories without truncation) -----
         elif shorts_collected < target_shorts:
             # Preserve 100% of complete stories that naturally fit within YouTube Shorts (up to ~3 minutes)
-            if 90 <= word_count <= 450:
+            if 90 <= word_count <= 550:
                 story_content = text
                 word_cnt = word_count
-            elif word_count > 450:
-                story_content, word_cnt = trim_story_to_short(text, min_words=200, max_words=450)
+            elif word_count > 550:
+                story_content, word_cnt = trim_story_to_short(text, min_words=200, max_words=550)
                 if word_cnt < 90:
                     continue
             else:

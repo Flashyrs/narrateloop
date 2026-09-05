@@ -1,4 +1,5 @@
 import os
+import json
 import random
 import subprocess
 import wave
@@ -298,6 +299,22 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
 
     if not os.path.exists(output_path):
         raise FileNotFoundError(f"[ERROR] Output video not created at: {output_path}")
+
+    # Extract high-definition video frame at t=1.0s as the official thumbnail for YouTube
+    extracted_thumb_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"reddit_stories/{date_str}/thumb_{story_name}.png"))
+    try:
+        extract_cmd = [
+            "ffmpeg", "-y",
+            "-ss", "1.0",
+            "-i", output_path,
+            "-frames:v", "1",
+            "-update", "1",
+            extracted_thumb_path
+        ]
+        subprocess.run(extract_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        print(f"[SUCCESS] Extracted video frame thumbnail: {extracted_thumb_path}")
+    except Exception as e:
+        print(f"⚠️ Thumbnail extraction warning: {e}")
 
     print(f"[SUCCESS] Video rendered successfully at: {output_path}")
     return output_path

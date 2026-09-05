@@ -45,38 +45,59 @@ SUBREDDIT_VOICES = {
     "askredditkpop": {
         "male": "en-US-EricNeural",
         "female": "en-US-AriaNeural",
-        "rate": "+25%"
+        "rate": "+30%"
     },
-    # Intense drama & payback
-    "nuclearrevenge": {
-        "male": "en-US-ChristopherNeural",
-        "female": "en-US-AriaNeural",
-        "rate": "+22%"
-    },
-    # Moral conflicts & disputes
+    # Moral conflicts, debates
     "amitheasshole": {
         "male": "en-US-GuyNeural",
+        "female": "en-US-AriaNeural",
+        "rate": "+30%"
+    },
+    "aitah": {
+        "male": "en-US-GuyNeural",
+        "female": "en-US-AriaNeural",
+        "rate": "+30%"
+    },
+    # Petty / Pro / Nuclear Revenge
+    "pettyrevenge": {
+        "male": "en-US-EricNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+22%"
+        "rate": "+30%"
+    },
+    "prorevenge": {
+        "male": "en-US-EricNeural",
+        "female": "en-US-JennyNeural",
+        "rate": "+30%"
+    },
+    "nuclearrevenge": {
+        "male": "en-US-EricNeural",
+        "female": "en-US-JennyNeural",
+        "rate": "+30%"
+    },
+    # Embarrassing / Comedic mishaps
+    "tifu": {
+        "male": "en-US-BrianNeural",
+        "female": "en-US-AriaNeural",
+        "rate": "+30%"
     },
     # Intimate, reflective confessions
     "confessions": {
         "male": "en-US-RogerNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+22%"
+        "rate": "+30%"
     },
     # Raw feelings & unfiltered stories
     "trueoffmychest": {
         "male": "en-US-ChristopherNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+22%"
+        "rate": "+30%"
     }
 }
 
 DEFAULT_VOICE = {
     "male": "en-US-ChristopherNeural",
     "female": "en-US-JennyNeural",
-    "rate": "+22%"
+    "rate": "+30%"
 }
 
 
@@ -90,7 +111,7 @@ def get_voice_for_subreddit(subreddit, gender):
 
     # Subreddit voice
     voice = config.get(gender, DEFAULT_VOICE[gender])
-    rate = config.get("rate", "+22%")
+    rate = config.get("rate", "+30%")
 
     # Optional manual override via .env if specified
     if gender == "male" and os.getenv("EDGE_VOICE_MALE"):
@@ -105,12 +126,64 @@ def get_voice_for_subreddit(subreddit, gender):
 
 
 def detect_gender(text):
-    """Detects likely author gender from text markers like '24F', '28M', or pronouns."""
-    matches = re.findall(r"\b\d{1,2}[MF]\b", text.upper())
-    genders = [m[-1] for m in matches]
-    if not genders:
+    """
+    Detects likely narrator gender using contextual NLP analysis:
+    - Direct self-identification: 'I (24F)', 'I [28F]', 'as a woman', 'I am a woman/girl/female/wife/mother/mom'
+    - Relationship partner context: 'my husband', 'my boyfriend', 'my fiancé', 'my baby daddy' (narrator is female)
+    - Inverse male self-identification & partner context: 'I (28M)', 'my wife', 'my girlfriend', 'my fiancée'
+    - Age/gender tag parsing with narrator subject association.
+    """
+    if not text:
         return "male"
-    return "female" if genders.count("F") > genders.count("M") else "male"
+    
+    text_lower = text.lower()
+    
+    # 1. Direct female narrator self-identification and female-specific situations
+    female_self_patterns = [
+        r"\bi\s*[\(\[]\s*\d{1,2}\s*f\s*[\)\]]",
+        r"\b(i am|i'm|im)\s+a\s+(woman|girl|female|wife|mother|mom|bride)\b",
+        r"\bas\s+a\s+(woman|girl|female|wife|mother|mom)\b",
+        r"\b(my\s+husband|my\s+boyfriend|my\s+fianc[eé]|my\s+bf|my\s+hubby|my\s+baby\s+daddy)\b",
+        r"\bhe\s+called\s+me\s+(his\s+wife|his\s+girl|a\s+bitch|his\s+woman)\b",
+        r"\b(pregnant|giving\s+birth|my\s+pregnancy|my\s+period)\b"
+    ]
+    
+    # 2. Direct male narrator self-identification
+    male_self_patterns = [
+        r"\bi\s*[\(\[]\s*\d{1,2}\s*m\s*[\)\]]",
+        r"\b(i am|i'm|im)\s+a\s+(man|guy|male|husband|father|dad|groom)\b",
+        r"\bas\s+a\s+(man|guy|male|husband|father|dad)\b",
+        r"\b(my\s+wife|my\s+girlfriend|my\s+fianc[eé]e|my\s+gf|my\s+baby\s+mama)\b",
+        r"\bshe\s+called\s+me\s+(her\s+husband|her\s+man)\b"
+    ]
+    
+    female_score = 0
+    male_score = 0
+    
+    for pat in female_self_patterns:
+        female_score += len(re.findall(pat, text_lower)) * 2
+        
+    for pat in male_self_patterns:
+        male_score += len(re.findall(pat, text_lower)) * 2
+
+    # 3. Check standalone age/gender tags: e.g. "husband (41M)" -> husband is male, so speaker is female
+    partner_male_tags = re.findall(r"\b(husband|boyfriend|bf|fianc[eé]|ex)\s*[\(\[]\s*\d{1,2}\s*m\s*[\)\]]", text_lower)
+    partner_female_tags = re.findall(r"\b(wife|girlfriend|gf|fianc[eé]e|ex)\s*[\(\[]\s*\d{1,2}\s*f\s*[\)\]]", text_lower)
+    
+    female_score += len(partner_male_tags) * 3
+    male_score += len(partner_female_tags) * 3
+
+    if female_score > male_score:
+        return "female"
+    elif male_score > female_score:
+        return "male"
+
+    # Fallback to general isolated gender tags if no contextual relationship match
+    general_tags = re.findall(r"\b\d{1,2}([MF])\b", text.upper())
+    if general_tags:
+        return "female" if general_tags.count("F") > general_tags.count("M") else "male"
+        
+    return "male"
 
 
 def clean_text_for_tts(text):
