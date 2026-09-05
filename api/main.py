@@ -368,9 +368,8 @@ def get_today_logs(limit: int = 50):
 # Favicon Endpoint
 # ---------------------------------------------------------------------------
 FAVICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
-  <rect width="32" height="32" rx="8" fill="#10B981"/>
-  <path d="M12 9L22 16L12 23V9Z" fill="#09090B"/>
-  <circle cx="24" cy="8" r="2" fill="#FFFFFF"/>
+  <rect width="32" height="32" rx="8" fill="#09090B"/>
+  <circle cx="16" cy="16" r="6" fill="#10B981"/>
 </svg>"""
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -457,19 +456,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             display: flex;
             align-items: center;
             gap: 12px;
-        }
-
-        .logo-box {
-            width: 32px;
-            height: 32px;
-            background: var(--accent-green);
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #09090b;
-            font-weight: 700;
-            font-size: 16px;
         }
 
         .brand-header h1 {
@@ -897,7 +883,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <header>
             <div class="brand-block">
                 <div class="brand-header">
-                    <div class="logo-box">▶</div>
                     <h1>AutoReel</h1>
                     <div class="status-pill" id="service-status">
                         <div class="status-dot"></div>
