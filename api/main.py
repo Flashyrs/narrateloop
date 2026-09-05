@@ -861,7 +861,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </html>
 """
 
-@app.get("/", response_class=HTMLResponse, tags=["Dashboard"], include_in_schema=False)
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse, tags=["Dashboard"], include_in_schema=False)
 def get_dashboard():
     """
     Renders the ultra-minimalist developer dashboard.
