@@ -36,7 +36,8 @@ High-throughput autonomous backend orchestrating Reddit content extraction, cont
     """,
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    swagger_favicon_url="/api/logo"
 )
 
 app.add_middleware(
@@ -389,8 +390,8 @@ def get_favicon_or_logo():
     if logo_path and os.path.exists(logo_path):
         ext = Path(logo_path).suffix.lower()
         mime = "image/jpeg" if ext in [".jpg", ".jpeg"] else ("image/png" if ext == ".png" else "image/webp")
-        return FileResponse(path=logo_path, media_type=mime)
-    return Response(content=FAVICON_SVG, media_type="image/svg+xml")
+        return FileResponse(path=logo_path, media_type=mime, headers={"Cache-Control": "public, max-age=3600"})
+    return Response(content=FAVICON_SVG, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=3600"})
 
 # ---------------------------------------------------------------------------
 # Full-Viewport Developer Dashboard (Vercel/Linear Style, High Impact)
@@ -401,7 +402,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NarrateLoop</title>
-    <link rel="icon" href="/favicon.ico">
+    <link rel="icon" type="image/jpeg" href="/api/logo?v=3">
+    <link rel="shortcut icon" href="/api/logo?v=3">
+    <link rel="apple-touch-icon" href="/api/logo?v=3">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
