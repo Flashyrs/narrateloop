@@ -381,21 +381,27 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
     if not os.path.exists(output_path):
         raise FileNotFoundError(f"[ERROR] Output video not created at: {output_path}")
 
-    # Extract high-definition video frame at t=1.0s as the official thumbnail for YouTube
+    # Ensure thumbnail exists for YouTube upload (preserve pristine PIL card composite)
     extracted_thumb_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"reddit_stories/{date_str}/thumb_{story_name}.png"))
-    try:
-        extract_cmd = [
-            "ffmpeg", "-y",
-            "-ss", "1.0",
-            "-i", output_path,
-            "-frames:v", "1",
-            "-update", "1",
-            extracted_thumb_path
-        ]
-        subprocess.run(extract_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-        print(f"[SUCCESS] Extracted video frame thumbnail: {extracted_thumb_path}")
-    except Exception as e:
-        print(f"⚠️ Thumbnail extraction warning: {e}")
+    if not os.path.exists(extracted_thumb_path):
+        try:
+            # Fallback extraction from video intro during title display
+            extract_time = f"{max(0.2, min(1.0, title_end_time * 0.4)):.2f}"
+            extract_cmd = [
+                "ffmpeg", "-y",
+                "-i", output_path,
+                "-ss", extract_time,
+                "-frames:v", "1",
+                "-update", "1",
+                extracted_thumb_path
+            ]
+            subprocess.run(extract_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            print(f"[SUCCESS] Extracted video frame thumbnail: {extracted_thumb_path}")
+        except Exception as e:
+            print(f"⚠️ Thumbnail extraction warning: {e}")
+    else:
+        print(f"[SUCCESS] Verified composite thumbnail: {extracted_thumb_path}")
 
     print(f"[SUCCESS] Video rendered successfully at: {output_path}")
     return output_path
+

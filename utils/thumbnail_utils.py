@@ -299,59 +299,6 @@ def composite_card_over_background(card_img, bg_img, output_path, format="short"
     return output_path
 
 
-def capture_reddit_screenshot_card(reddit_url, temp_save_path):
-    """
-    Attempts to capture only the Reddit post card element via Playwright.
-    Returns the PIL Image if successful, None otherwise.
-    """
-    try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-                locale="en-US",
-                viewport={"width": 1080, "height": 1920}
-            )
-            page = context.new_page()
-            page.goto(reddit_url, timeout=30000)
-
-            # Accept cookies
-            try:
-                page.locator("text=Accept All").click(timeout=2000)
-            except Exception:
-                pass
-
-            title_selector = "h1[id^='post-title-t3_']"
-            body_selector = "div[id$='-post-rtjson-content']"
-
-            title = page.wait_for_selector(title_selector, timeout=10000)
-            content = page.wait_for_selector(body_selector, timeout=10000)
-
-            title_box = title.bounding_box()
-            content_box = content.bounding_box()
-
-            if title_box and content_box:
-                x = min(title_box["x"], content_box["x"]) - 16
-                y = min(title_box["y"], content_box["y"]) - 16
-                max_x = max(title_box["x"] + title_box["width"], content_box["x"] + content_box["width"]) + 16
-                max_y = max(title_box["y"] + title_box["height"], content_box["y"] + content_box["height"]) + 16
-
-                x = max(0, x)
-                y = max(0, y)
-                width = max_x - x
-                height = min(max_y - y, 900)  # Cap height so it doesn't cover screen
-
-                page.screenshot(path=temp_save_path, clip={"x": x, "y": y, "width": width, "height": height})
-                browser.close()
-                if os.path.exists(temp_save_path):
-                    return Image.open(temp_save_path).convert("RGBA")
-            browser.close()
-    except Exception as e:
-        print(f"ℹ️ Playwright card capture skipped ({e})")
-    return None
-
-
 def create_transparent_card_overlay(card_img, canvas_w=1080, canvas_h=1920, format="short"):
     """
     Places the Reddit Card with soft Gaussian drop-shadow onto an empty transparent canvas (1080x1920).
@@ -381,11 +328,11 @@ def create_transparent_card_overlay(card_img, canvas_w=1080, canvas_h=1920, form
 
 def create_reddit_thumbnail(title_text, subreddit="relationship_advice", body_text="", output_path="thumb.png", format="short", gameplay_path=None, post_url=None):
     """
-    Master thumbnail generator:
-    1. Extracts a random snippet frame from the selected gameplay video as the background for the YouTube thumbnail image.
-    2. Overlays the Reddit post card (either Playwright screenshot or realistic Reddit UI card)
-       in the foreground.
-    3. Saves both:
+    Master thumbnail & card generator using 100% pure PIL:
+    1. Extracts a snippet frame from gameplay video as background for the YouTube thumbnail.
+    2. Generates the realistic Reddit UI Dark Mode Card directly in PIL with title, subreddit badge,
+       drop shadow, upvote & comment counters.
+    3. Saves:
        - thumb_{idx}.png (Full composite for YouTube thumbnail upload)
        - card_{idx}.png (1080x1920 transparent card for live moving gameplay video intro overlay)
     """
@@ -395,26 +342,8 @@ def create_reddit_thumbnail(title_text, subreddit="relationship_advice", body_te
     # 1. Background gameplay video snippet frame (for YouTube thumbnail)
     bg_img = extract_gameplay_frame(gameplay_path=gameplay_path, width=w, height=h)
 
-    # 2. Foreground Reddit Card
-    card_img = None
-    if post_url:
-        temp_cap = os.path.join(PROJECT_ROOT, f"temp_cap_{random.randint(1000, 9999)}.png")
-        card_img = capture_reddit_screenshot_card(post_url, temp_cap)
-        if os.path.exists(temp_cap):
-            try:
-                os.remove(temp_cap)
-            except Exception:
-                pass
-        if card_img:
-            # Resize captured card to fit width
-            aspect = card_img.height / card_img.width
-            new_h = int(card_w * aspect)
-            new_h = min(new_h, int(h * 0.45)) # Cap height
-            card_img = card_img.resize((card_w, new_h), Image.Resampling.LANCZOS)
-
-    # If no screenshot captured, render the realistic Reddit Card
-    if card_img is None:
-        card_img = render_reddit_card_pil(title_text, subreddit, body_text=body_text, card_width=card_w)
+    # 2. Pure PIL Reddit UI Card
+    card_img = render_reddit_card_pil(title_text, subreddit, body_text=body_text, card_width=card_w)
 
     # 3. Save transparent card overlay (used over live video gameplay during title intro)
     card_overlay_path = output_path.replace("thumb_", "card_")
@@ -434,3 +363,4 @@ def capture_reddit_screenshot(reddit_url, save_path, retries=1, delay=1):
 
 def create_fallback_thumbnail(title_text, body_text, output_path, width=1080, height=1920):
     return create_reddit_thumbnail(title_text, "relationship_advice", body_text, output_path)
+
