@@ -99,7 +99,7 @@ Deployed 24/7 on an **Oracle Cloud Linux VM** with dual-redundancy `systemd` pro
 ## 📂 Project Structure
 
 ```
-AutoReel/
+NarrateLoop/
 ├── api/
 │   ├── main.py                     # FastAPI REST API & Vercel-style developer dashboard
 │   └── __init__.py
