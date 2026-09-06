@@ -6,7 +6,7 @@
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![FFmpeg NVENC](https://img.shields.io/badge/FFmpeg-GPU_NVENC-007808?style=for-the-badge&logo=ffmpeg&logoColor=white)](https://ffmpeg.org)
 
-**NarrateLoop** is an autonomous, high-throughput media generation and distributed content ingestion engine. It transforms raw text stories from Reddit into viral, high-retention 9:16 vertical YouTube Shorts and 16:9 videos using contextual NLP gender classification, neural audio synthesis (+30% pacing), word-level dynamic ASS subtitle overlays, GPU-accelerated FFmpeg compositing, and automated multi-tier YouTube distribution.
+**NarrateLoop** is an autonomous, high-throughput media generation and distributed content ingestion engine. It transforms raw text stories from Reddit into viral, high-retention 9:16 vertical YouTube Shorts and 16:9 videos using contextual NLP gender classification, neural audio synthesis (+25% pacing), word-level dynamic ASS subtitle overlays, GPU-accelerated FFmpeg compositing, and automated multi-tier YouTube distribution.
 
 Deployed 24/7 on an **Oracle Cloud Linux VM** with dual-redundancy `systemd` process supervision, SQLite asset tracking, and real-time Telegram remote telemetry.
 
@@ -28,7 +28,7 @@ Deployed 24/7 on an **Oracle Cloud Linux VM** with dual-redundancy `systemd` pro
                                  └────────────┬────────────┘
                                               ▼
                                  ┌─────────────────────────┐
-                                 │  Stage 3: Neural Voice  │  (Edge-TTS / Bark +30% Rate
+                                 │  Stage 3: Neural Voice  │  (Edge-TTS / Bark +25% Rate
                                  │     & Whisper Timing    │   Word-Level Exact Timestamps)
                                  └────────────┬────────────┘
                                               ▼
@@ -58,14 +58,14 @@ Deployed 24/7 on an **Oracle Cloud Linux VM** with dual-redundancy `systemd` pro
   2. Direct Datacenter OAuth token negotiation (designed for Cloud IPs).
   3. RSS2JSON XML-to-JSON proxy feed parser for 100% cloud reliability.
 * **Text Cleansing & Formatting**: Regex pipeline removes markdown hyperlinks, URLs, subreddit headers, and user attribution tags (`/u/...`), preventing extraneous artifacts during TTS synthesis.
-* **Full-Length Preservation**: Stories up to **550 words** (~2.45 to 3.00 minutes at +30% pacing) are ingested with 100% zero sentence truncation.
+* **Full-Length Preservation**: Stories up to **550 words** (~2.45 to 3.00 minutes at +25% pacing) are ingested with 100% zero sentence truncation.
 
 ### 2. Contextual NLP Gender & Voice Modeling (`generate_tts.py`)
 * **Partner & Self-Identification Parsing**: Analyzes relationship markers (e.g. *"Husband (41M)"* / *"my boyfriend"* indicates a **female** narrator assigned `en-US-JennyNeural`, whereas *"Wife (35F)"* / *"my girlfriend"* indicates a **male** narrator assigned `en-US-ChristopherNeural`).
 * **Subreddit-Specific Tone Tuning**: Custom neural voice mapping tailored per subreddit genre (`r/tifu` gets energetic pacing; `r/confessions` gets reflective pacing).
 
 ### 3. Neural Speech Synthesis & Word-Level Alignment (`generate_subs.py`)
-* **High-Pacing Narration**: Speech rate accelerated to **`+30%`** for snappy short-form retention.
+* **High-Pacing Narration**: Speech rate accelerated to **`+25%`** for snappy short-form retention.
 * **Dynamic ASS Subtitle Engine**: Generates Advanced SubStation Alpha (`.ass`) files with word-level highlight timing (`&H0000FFFF` rhythm yellow and `&H000000FF` emphasis red), exact font scaling, and safety margins to eliminate subtitle drift.
 
 ### 4. GPU-Accelerated FFmpeg Sub-Pixel Video Compositing (`render_video.py`)
@@ -105,7 +105,7 @@ AutoReel/
 │   └── __init__.py
 ├── scripts/
 │   ├── fetch_reddit.py             # Multi-tier Reddit ingest & 550w story preservation
-│   ├── generate_tts.py             # NLP gender detection & neural speech synthesis (+30%)
+│   ├── generate_tts.py             # NLP gender detection & neural speech synthesis (+25%)
 │   ├── generate_subs.py            # Dynamic ASS/SSA subtitle compiler with word sync
 │   ├── render_video.py             # FFmpeg filtergraph engine & frame thumbnail extraction
 │   ├── upload_to_youtube.py        # YouTube Data API v3 upload & metadata manager
@@ -137,6 +137,20 @@ AutoReel/
 * `GET /api/videos/{date}/{index}/download` — Direct `.mp4` video artifact download.
 * `GET /api/logs/today` — Live server execution logs stream.
 
+---
+
+## 📜 Resume Bullet Points (FAANG SDE-1 / Software Engineer)
+
+> **NarrateLoop — Autonomous Reddit-to-Video GenAI Pipeline**  
+> *Python • FastAPI • FFmpeg (NVENC) • PyTorch • Whisper • Bark • SQLite • Linux (systemd) • Oracle Cloud*  
+> * [Live Dashboard & Swagger Docs: https://narrateloop.duckdns.org/docs]  
+> * [GitHub Repository: https://github.com/Flashyrs/narrateloop]  
+>
+> * **Built a 24/7 autonomous multimodal GenAI pipeline** deployed on Oracle Cloud, orchestrating Reddit content extraction, Gemini NLP metadata cleansing, neural speech synthesis (+25% pacing), and automated YouTube distribution with zero human intervention.
+> * **Implemented GPU-accelerated video rendering via FFmpeg NVENC** with sub-pixel overlay placement, dynamic alpha transitions, and dynamic ASS/SSA word-synchronized subtitle highlighting across 100+ production renders.
+> * **Engineered speech synthesis & alignment systems** leveraging Suno Bark, Edge-TTS, and Whisper word-level alignment with GPUtil VRAM monitoring and automated CPU fallback on CUDA OOM.
+> * **Designed fault-tolerant ingest pipelines** featuring 3-tier fallback (PRAW OAuth to direct datacenter tokens to RSS proxies) and dual-redundancy Linux `systemd` supervision with `psutil` concurrency coordination.
+> * **Developed a high-performance FastAPI telemetry service** exposing interactive Swagger `/docs`, video artifact streaming/download endpoints, and automated Let's Encrypt SSL reverse-proxied through Nginx.
 
 ---
 

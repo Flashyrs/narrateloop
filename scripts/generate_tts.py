@@ -27,77 +27,71 @@ SUBREDDIT_VOICES = {
     "askreddit": {
         "male": "en-US-GuyNeural",
         "female": "en-US-MichelleNeural",
-        "rate": "+25%"
+        "rate": "+20%"
     },
     # Emotional, serious relationship drama
     "relationship_advice": {
         "male": "en-US-ChristopherNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+22%"
+        "rate": "+18%"
     },
     # Dramatic, fast-paced, humorous fuckups
     "tifu": {
-        "male": "en-US-EricNeural",
+        "male": "en-US-BrianNeural",
         "female": "en-US-AriaNeural",
-        "rate": "+30%"
+        "rate": "+25%"
     },
     # Pop culture & music
     "askredditkpop": {
         "male": "en-US-EricNeural",
         "female": "en-US-AriaNeural",
-        "rate": "+30%"
+        "rate": "+25%"
     },
     # Moral conflicts, debates
     "amitheasshole": {
         "male": "en-US-GuyNeural",
         "female": "en-US-AriaNeural",
-        "rate": "+30%"
+        "rate": "+25%"
     },
     "aitah": {
         "male": "en-US-GuyNeural",
         "female": "en-US-AriaNeural",
-        "rate": "+30%"
+        "rate": "+25%"
     },
     # Petty / Pro / Nuclear Revenge
     "pettyrevenge": {
         "male": "en-US-EricNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+30%"
+        "rate": "+25%"
     },
     "prorevenge": {
         "male": "en-US-EricNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+30%"
+        "rate": "+25%"
     },
     "nuclearrevenge": {
         "male": "en-US-EricNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+30%"
-    },
-    # Embarrassing / Comedic mishaps
-    "tifu": {
-        "male": "en-US-BrianNeural",
-        "female": "en-US-AriaNeural",
-        "rate": "+30%"
+        "rate": "+25%"
     },
     # Intimate, reflective confessions
     "confessions": {
         "male": "en-US-RogerNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+30%"
+        "rate": "+25%"
     },
     # Raw feelings & unfiltered stories
     "trueoffmychest": {
         "male": "en-US-ChristopherNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+30%"
+        "rate": "+25%"
     }
 }
 
 DEFAULT_VOICE = {
     "male": "en-US-ChristopherNeural",
     "female": "en-US-JennyNeural",
-    "rate": "+30%"
+    "rate": "+25%"
 }
 
 
@@ -111,7 +105,7 @@ def get_voice_for_subreddit(subreddit, gender):
 
     # Subreddit voice
     voice = config.get(gender, DEFAULT_VOICE[gender])
-    rate = config.get("rate", "+30%")
+    rate = config.get("rate", "+25%")
 
     # Optional manual override via .env if specified
     if gender == "male" and os.getenv("EDGE_VOICE_MALE"):

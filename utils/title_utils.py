@@ -1,18 +1,7 @@
 import random
 import google.generativeai as genai
 import os
-import sys
 import re
-from dotenv import load_dotenv
-
-if sys.platform == "win32":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-
-load_dotenv()
 
 HOOKS = ["INSANE", "KARMA", "REVENGE", "EXPOSED", "UNBELIEVABLE", "HEARTBREAKING", "SHOCKING", "TWISTED"]
 
@@ -29,11 +18,8 @@ def clean_title_for_ffmpeg(title):
 
 def generate_title_with_gemini(text, fallback_title):
     try:
-        api_key = os.environ.get("GOOGLE_API_KEY")
-        if not api_key:
-            return fallback_title
-        genai.configure(api_key=api_key)
-        model_name = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash").strip()
+        genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
+        model_name = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash").strip()
         if not model_name.startswith("models/"):
             model_name = f"models/{model_name}"
         model = genai.GenerativeModel(model_name=model_name)

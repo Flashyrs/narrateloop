@@ -32,7 +32,7 @@ app = FastAPI(
     title="NarrateLoop : Autonomous Reddit-to-Video GenAI Pipeline",
     description="""
 ### NarrateLoop — Distributed Multimodal Media & Content Ingestion Engine
-High-throughput autonomous backend orchestrating Reddit content extraction, contextual NLP gender classification, neural audio synthesis (+30% pacing), dynamic FFmpeg sub-pixel video rendering, and multi-tier YouTube distribution.
+High-throughput autonomous backend orchestrating Reddit content extraction, contextual NLP gender classification, neural audio synthesis (+25% pacing), dynamic FFmpeg sub-pixel video rendering, and multi-tier YouTube distribution.
     """,
     version="1.0.0",
     docs_url="/docs",
@@ -1000,7 +1000,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <span class="flow-step">STAGE 03</span>
                 <div class="flow-box">
                     <div class="flow-title">Neural Synthesis</div>
-                    <div class="flow-sub">Edge-TTS (+30% Rate)</div>
+                    <div class="flow-sub">Edge-TTS (+25% Rate)</div>
                 </div>
             </div>
             <span class="flow-arrow">→</span>
