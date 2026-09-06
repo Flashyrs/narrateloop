@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from utils.youtube_utils import is_title_already_uploaded
 from utils.thumbnail_utils import create_reddit_thumbnail
-from utils.title_utils import generate_title_with_gemini
+from utils.title_utils import generate_title_with_gemini, enhance_story_hook_with_gemini
 
 if sys.platform == "win32":
     try:
@@ -93,6 +93,26 @@ def censor(text):
     for word in CENSOR_WORDS:
         text = replace_word(word)
     return text
+
+CTA_ENDINGS = [
+    "What would you do in this situation? Let me know in the comments below, and subscribe for daily stories!",
+    "Who do you think was in the wrong here? Drop your thoughts in the comments and subscribe for more stories!",
+    "Would you have handled this differently? Let me know in the comments below, and subscribe for daily Reddit stories!"
+]
+
+def append_engagement_cta(text):
+    """
+    Appends an engaging question and subscribe call-to-action if not already present.
+    This spikes comment-to-view ratios and boosts YouTube Shorts distribution.
+    """
+    if not text:
+        return text
+    clean = text.strip()
+    # Check if the story already ends with a question or CTA
+    if any(q in clean.lower()[-120:] for q in ["what would you do", "aita", "what do you think", "thoughts?", "let me know", "subscribe"]):
+        return clean
+    cta = random.choice(CTA_ENDINGS)
+    return f"{clean} {cta}"
 
 def trim_story_to_short(text, min_words=100, max_words=550):
     """
@@ -317,7 +337,9 @@ def fetch_reddit_posts():
     idx_today = 1
 
     for post in posts_collected:
-        text = post["text"]
+        raw_text = post["text"]
+        # AI Hook Transformation: rewrite opening 1-2 sentences for uniqueness & high CTR
+        text = enhance_story_hook_with_gemini(raw_text, subreddit=subreddit)
         word_count = len(text.split())
         raw_title = post["title"]
         subreddit = post["subreddit"]
@@ -364,6 +386,10 @@ def fetch_reddit_posts():
                     continue
             else:
                 continue
+
+            # Add viral engagement CTA question
+            story_content = append_engagement_cta(story_content)
+            word_cnt = len(story_content.split())
 
             story = {
                 "title": gemini_title,

@@ -46,3 +46,46 @@ def generate_title_with_gemini(text, fallback_title):
     except Exception as e:
         print(f"⚠️ Gemini failed, fallback title used: {e}")
         return fallback_title
+
+
+def enhance_story_hook_with_gemini(text, subreddit="Reddit"):
+    """
+    Rewrites the opening 1-2 sentences of a Reddit story into an intense, punchy hook.
+    Removes intro fluff ('Throwaway account', 'Sorry for formatting', 'My first time posting here')
+    and ensures unique narrative phrasing to prevent duplicate transcript penalties.
+    """
+    if not text or len(text) < 80:
+        return text
+
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        return text
+
+    try:
+        genai.configure(api_key=api_key)
+        model_name = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash").strip()
+        if not model_name.startswith("models/"):
+            model_name = f"models/{model_name}"
+        model = genai.GenerativeModel(model_name=model_name)
+
+        prompt = (
+            f"You are a viral YouTube Shorts editor adapting a real story from r/{subreddit}.\n"
+            "Task: Rewrite the opening 1-2 sentences of this story into an intense, punchy narrative hook.\n"
+            "Rules:\n"
+            "1. Remove boring intro filler like 'Throwaway account because...', 'Posting from mobile', 'Long time lurker'.\n"
+            "2. Keep the narrator's authentic first-person perspective and exact facts.\n"
+            "3. Output ONLY the complete revised story with your new opening hook seamlessly flowing into the remaining body.\n"
+            "4. Do NOT add meta commentary, quotes, markdown formatting, or emojis.\n\n"
+            f"Original Story:\n{text}"
+        )
+
+        response = model.generate_content(prompt)
+        enhanced_text = response.candidates[0].content.parts[0].text.strip()
+        if enhanced_text and len(enhanced_text) >= len(text) * 0.7:
+            # Clean non-ascii artifacts
+            enhanced_text = re.sub(r'[^\x00-\x7F]+', '', enhanced_text).strip()
+            return enhanced_text
+        return text
+    except Exception as e:
+        print(f"⚠️ Gemini hook enhancement fallback: {e}")
+        return text

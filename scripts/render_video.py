@@ -8,8 +8,22 @@ from pathlib import Path
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 GAMEPLAY_DIR = os.path.join(PROJECT_ROOT, "assets", "gameplays")
+MUSIC_DIR = os.path.join(PROJECT_ROOT, "assets", "music")
+SFX_DIR = os.path.join(PROJECT_ROOT, "assets", "sfx")
 
 _video_duration_cache = {}
+
+def get_available_music_tracks():
+    """Returns a list of all valid audio tracks in assets/music."""
+    valid_exts = {".wav", ".mp3", ".m4a", ".ogg", ".flac"}
+    if not os.path.exists(MUSIC_DIR):
+        os.makedirs(MUSIC_DIR, exist_ok=True)
+    return [
+        os.path.join(MUSIC_DIR, f)
+        for f in os.listdir(MUSIC_DIR)
+        if Path(f).suffix.lower() in valid_exts and not f.startswith(".")
+    ]
+
 
 def get_audio_duration(audio_path):
     """Accurately gets audio duration in seconds using wave or ffprobe."""
@@ -190,7 +204,7 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
     audio_duration = get_audio_duration(audio_path)
     print(f"[DEBUG] Audio duration: {audio_duration:.2f}s")
 
-    # Prepare gameplay video input (Method A or Method B)
+    # Prepare gameplay video input (Input 0)
     gameplay_input_args, temp_concat_file = prepare_gameplay_input(audio_duration, specific_clip_path=gameplay_path)
 
     # Check if transparent card overlay exists for live gameplay video intro
@@ -226,36 +240,103 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
     encoder = get_best_video_encoder()
     print(f"[DEBUG] Using video encoder: {encoder}")
 
-    extra_inputs = []
+    # Build FFmpeg inputs:
+    # Input 0: gameplay video
+    # Input 1: voice audio
+    input_args = list(gameplay_input_args) + ["-i", audio_path_ffmpeg]
+    current_input_idx = 2
+
+    # Input 2 (optional): Card overlay image
+    card_idx = None
     if overlay_img_path:
+        card_idx = current_input_idx
+        current_input_idx += 1
         overlay_path_ffmpeg = overlay_img_path.replace("\\", "/")
-        extra_inputs = ["-loop", "1", "-i", overlay_path_ffmpeg]
+        input_args += ["-loop", "1", "-i", overlay_path_ffmpeg]
+
+    # Input (optional): Background music track
+    music_tracks = get_available_music_tracks()
+    music_idx = None
+    if music_tracks:
+        chosen_music = random.choice(music_tracks)
+        music_idx = current_input_idx
+        current_input_idx += 1
+        input_args += ["-stream_loop", "-1", "-i", chosen_music.replace("\\", "/")]
+        print(f"[DEBUG] Layering background music: {os.path.basename(chosen_music)}")
+
+    # Input (optional): Whoosh transition SFX
+    whoosh_path = os.path.join(SFX_DIR, "whoosh.wav")
+    sfx_idx = None
+    if card_idx is not None and os.path.exists(whoosh_path):
+        sfx_idx = current_input_idx
+        current_input_idx += 1
+        input_args += ["-i", whoosh_path.replace("\\", "/")]
+        print(f"[DEBUG] Layering card transition SFX at t={title_end_time:.2f}s")
+
+    # ----------------------------------------------------
+    # Video Filter Graph Construction
+    # ----------------------------------------------------
+    if card_idx is not None:
         fade_d = 0.4
         fade_st = max(0.1, title_end_time - fade_d)
-        
-        filter_complex = (
-            f"[2:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},format=yuva420p,fade=t=out:st={fade_st:.2f}:d={fade_d:.2f}:alpha=1[card];"
+        v_filter = (
+            f"[{card_idx}:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},format=yuva420p,fade=t=out:st={fade_st:.2f}:d={fade_d:.2f}:alpha=1[card];"
             f"[0:v]fps=30,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1[gameplay];"
             f"[gameplay][card]overlay=0:0:enable='between(t,0,{title_end_time:.2f})':eof_action=pass[v_merged];"
             f"[v_merged]subtitles='{subtitle_path_ffmpeg}'[v_out]"
         )
-        map_args = ["-filter_complex", filter_complex, "-map", "[v_out]", "-map", "1:a:0"]
     else:
-        vf_filter = (
-            f"fps=30,"
+        v_filter = (
+            f"[0:v]fps=30,"
             f"scale={w}:{h}:force_original_aspect_ratio=increase,"
             f"crop={w}:{h},"
             f"setsar=1,"
-            f"subtitles='{subtitle_path_ffmpeg}'"
+            f"subtitles='{subtitle_path_ffmpeg}'[v_out]"
         )
-        map_args = ["-vf", vf_filter, "-map", "0:v:0", "-map", "1:a:0"]
+
+    # ----------------------------------------------------
+    # Audio Filter Graph: Dynamic Ducking & SFX
+    # ----------------------------------------------------
+    a_filters = []
+    if music_idx is not None:
+        # Music base volume + sidechain compression keyed to voiceover [1:a]
+        # Music ducks down to ~12% volume while voice is speaking, smoothly swelling to ~22% during pauses/outro
+        a_filters.append(
+            f"[{music_idx}:a]volume=0.22[m_vol];"
+            f"[m_vol][1:a]sidechaincompress=threshold=0.035:ratio=6:attack=150:release=700:makeup=1[m_ducked]"
+        )
+
+    if sfx_idx is not None:
+        sfx_delay_ms = max(0, int((title_end_time - 0.25) * 1000))
+        a_filters.append(
+            f"[{sfx_idx}:a]volume=0.45,adelay={sfx_delay_ms}|{sfx_delay_ms}[sfx_del]"
+        )
+
+    # Combine audio streams
+    if music_idx is not None and sfx_idx is not None:
+        a_filters.append(
+            f"[1:a][m_ducked][sfx_del]amix=inputs=3:duration=first:dropout_transition=2[a_out]"
+        )
+    elif music_idx is not None:
+        a_filters.append(
+            f"[1:a][m_ducked]amix=inputs=2:duration=first:dropout_transition=2[a_out]"
+        )
+    elif sfx_idx is not None:
+        a_filters.append(
+            f"[1:a][sfx_del]amix=inputs=2:duration=first:dropout_transition=2[a_out]"
+        )
+    else:
+        a_filters.append(
+            f"[1:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[a_out]"
+        )
+
+    full_filter_complex = v_filter + ";" + ";".join(a_filters)
+    map_args = ["-filter_complex", full_filter_complex, "-map", "[v_out]", "-map", "[a_out]"]
 
     cmd = [
         "ffmpeg",
         "-y"
-    ] + gameplay_input_args + [
-        "-i", audio_path_ffmpeg
-    ] + extra_inputs + [
+    ] + input_args + [
         "-c:v", encoder,
         "-preset", "ultrafast",
         "-crf", "24",

@@ -20,78 +20,83 @@ from scripts.telegram_notify import log
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 # ====================================================================
-# SUBREDDIT-AWARE VOICE MAPPING (Boosted by 5-10% for high retention)
+# SUBREDDIT-AWARE VOICE MAPPING (Boosted for high viral engagement)
 # ====================================================================
 SUBREDDIT_VOICES = {
     # Casual, funny, thought-provoking
     "askreddit": {
         "male": "en-US-GuyNeural",
-        "female": "en-US-MichelleNeural",
-        "rate": "+20%"
+        "female": "en-US-EmmaNeural",
+        "rate": "+30%"
     },
     # Emotional, serious relationship drama
     "relationship_advice": {
         "male": "en-US-ChristopherNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+18%"
+        "rate": "+28%"
     },
     # Dramatic, fast-paced, humorous fuckups
     "tifu": {
         "male": "en-US-BrianNeural",
         "female": "en-US-AriaNeural",
-        "rate": "+25%"
+        "rate": "+30%"
     },
     # Pop culture & music
     "askredditkpop": {
         "male": "en-US-EricNeural",
         "female": "en-US-AriaNeural",
-        "rate": "+25%"
+        "rate": "+30%"
     },
     # Moral conflicts, debates
     "amitheasshole": {
         "male": "en-US-GuyNeural",
         "female": "en-US-AriaNeural",
-        "rate": "+25%"
+        "rate": "+30%"
     },
     "aitah": {
         "male": "en-US-GuyNeural",
         "female": "en-US-AriaNeural",
-        "rate": "+25%"
+        "rate": "+30%"
     },
     # Petty / Pro / Nuclear Revenge
     "pettyrevenge": {
         "male": "en-US-EricNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+25%"
+        "rate": "+30%"
     },
     "prorevenge": {
         "male": "en-US-EricNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+25%"
+        "rate": "+30%"
     },
     "nuclearrevenge": {
         "male": "en-US-EricNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+25%"
+        "rate": "+30%"
     },
     # Intimate, reflective confessions
     "confessions": {
         "male": "en-US-RogerNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+25%"
+        "rate": "+28%"
     },
     # Raw feelings & unfiltered stories
     "trueoffmychest": {
         "male": "en-US-ChristopherNeural",
         "female": "en-US-JennyNeural",
-        "rate": "+25%"
+        "rate": "+30%"
+    },
+    "stories": {
+        "male": "en-US-AndrewNeural",
+        "female": "en-US-AvaNeural",
+        "rate": "+30%"
     }
 }
 
 DEFAULT_VOICE = {
     "male": "en-US-ChristopherNeural",
     "female": "en-US-JennyNeural",
-    "rate": "+25%"
+    "rate": "+30%"
 }
 
 
@@ -104,8 +109,8 @@ def get_voice_for_subreddit(subreddit, gender):
     config = SUBREDDIT_VOICES.get(sub_key, DEFAULT_VOICE)
 
     # Subreddit voice
-    voice = config.get(gender, DEFAULT_VOICE[gender])
-    rate = config.get("rate", "+25%")
+    voice = config.get(gender, DEFAULT_VOICE.get(gender, "en-US-ChristopherNeural"))
+    rate = config.get("rate", "+30%")
 
     # Optional manual override via .env if specified
     if gender == "male" and os.getenv("EDGE_VOICE_MALE"):
@@ -135,9 +140,10 @@ def detect_gender(text):
     # 1. Direct female narrator self-identification and female-specific situations
     female_self_patterns = [
         r"\bi\s*[\(\[]\s*\d{1,2}\s*f\s*[\)\]]",
-        r"\b(i am|i'm|im)\s+a\s+(woman|girl|female|wife|mother|mom|bride)\b",
-        r"\bas\s+a\s+(woman|girl|female|wife|mother|mom)\b",
-        r"\b(my\s+husband|my\s+boyfriend|my\s+fianc[eé]|my\s+bf|my\s+hubby|my\s+baby\s+daddy)\b",
+        r"\b\d{1,2}\s*f\b",
+        r"\b(i am|i'm|im)\s+(a\s+)?(\d{1,2}\s*(yo|year\s*old)\s+)?(woman|girl|female|wife|mother|mom|bride)\b",
+        r"\bas\s+a\s+(\d{1,2}\s*(yo|year\s*old)\s+)?(woman|girl|female|wife|mother|mom)\b",
+        r"\b(my\s+husband|my\s+ex-husband|my\s+ex\s+husband|my\s+boyfriend|my\s+ex-boyfriend|my\s+ex\s+bf|my\s+fianc[eé]|my\s+bf|my\s+hubby|my\s+baby\s+daddy)\b",
         r"\bhe\s+called\s+me\s+(his\s+wife|his\s+girl|a\s+bitch|his\s+woman)\b",
         r"\b(pregnant|giving\s+birth|my\s+pregnancy|my\s+period)\b"
     ]
@@ -145,9 +151,10 @@ def detect_gender(text):
     # 2. Direct male narrator self-identification
     male_self_patterns = [
         r"\bi\s*[\(\[]\s*\d{1,2}\s*m\s*[\)\]]",
-        r"\b(i am|i'm|im)\s+a\s+(man|guy|male|husband|father|dad|groom)\b",
-        r"\bas\s+a\s+(man|guy|male|husband|father|dad)\b",
-        r"\b(my\s+wife|my\s+girlfriend|my\s+fianc[eé]e|my\s+gf|my\s+baby\s+mama)\b",
+        r"\b\d{1,2}\s*m\b",
+        r"\b(i am|i'm|im)\s+(a\s+)?(\d{1,2}\s*(yo|year\s*old)\s+)?(man|guy|male|husband|father|dad|groom)\b",
+        r"\bas\s+a\s+(\d{1,2}\s*(yo|year\s*old)\s+)?(man|guy|male|husband|father|dad)\b",
+        r"\b(my\s+wife|my\s+ex-wife|my\s+ex\s+wife|my\s+girlfriend|my\s+ex-girlfriend|my\s+ex\s+gf|my\s+fianc[eé]e|my\s+gf|my\s+baby\s+mama)\b",
         r"\bshe\s+called\s+me\s+(her\s+husband|her\s+man)\b"
     ]
     
@@ -319,7 +326,6 @@ def generate_tts(date_str, story_name):
     elapsed = time.time() - start_t
 
     log(f"✅ [Story {story_name}] Voiceover generated: {duration:.1f}s audio ({word_count} words) in {elapsed:.2f}s!", telegram=True)
-    return out_path
     return out_path
 
 
