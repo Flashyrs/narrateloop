@@ -326,13 +326,13 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
     voice_idx = num_gameplay_inputs
     current_input_idx = num_gameplay_inputs + 1
 
-    # Input (optional): Card overlay image
+    # Input (optional): Title card overlay image
     card_idx = None
     if overlay_img_path:
         card_idx = current_input_idx
         current_input_idx += 1
         overlay_path_ffmpeg = overlay_img_path.replace("\\", "/")
-        input_args += ["-loop", "1", "-i", overlay_path_ffmpeg]
+        input_args += ["-loop", "1", "-t", f"{title_end_time + 2.0:.2f}", "-i", overlay_path_ffmpeg]
 
     # Input (optional): Background music track (Content-Aware Selection)
     chosen_music = get_content_aware_music(subreddit=story_subreddit, text=story_text)
@@ -340,7 +340,7 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
     if chosen_music:
         music_idx = current_input_idx
         current_input_idx += 1
-        input_args += ["-stream_loop", "10", "-i", chosen_music.replace("\\", "/")]
+        input_args += ["-stream_loop", "10", "-t", f"{audio_duration + 2.0:.2f}", "-i", chosen_music.replace("\\", "/")]
         print(f"[DEBUG] Layering background music: {os.path.basename(chosen_music)}")
 
     # Input (optional): Whoosh transition SFX
