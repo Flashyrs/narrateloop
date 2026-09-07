@@ -335,5 +335,10 @@ def generate_tts(date_str, story_name):
 if __name__ == "__main__":
     from datetime import datetime
     date_str = datetime.now().strftime("%Y%m%d")
-    for name in ["1", "2", "3"]:
+    target_names = ["1", "2", "3"]
+    if len(sys.argv) > 1 and sys.argv[1].isdigit() and len(sys.argv[1]) == 8:
+        date_str = sys.argv[1]
+    if len(sys.argv) > 2:
+        target_names = [sys.argv[2]]
+    for name in target_names:
         generate_tts(date_str, story_name=name)
