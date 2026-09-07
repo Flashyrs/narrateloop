@@ -6,9 +6,13 @@ token.pickle
 *.key.pub
 *.pem
 
-# Heavy gameplay footage
+# Heavy gameplay footage & media assets
 assets/gameplays/*
 !assets/gameplays/.gitkeep
+assets/music/*
+!assets/music/.gitkeep
+assets/sfx/*
+!assets/sfx/.gitkeep
 
 # Generated output directories
 audio/
