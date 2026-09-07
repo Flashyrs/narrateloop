@@ -494,3 +494,8 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
     print(f"[SUCCESS] Video rendered successfully at: {output_path}")
     return output_path
 
+if __name__ == "__main__":
+    target_date = sys.argv[1] if len(sys.argv) > 1 else datetime.now().strftime("%Y%m%d")
+    story_idx = sys.argv[2] if len(sys.argv) > 2 else "1"
+    render_video(target_date, story_name=story_idx)
+
