@@ -40,23 +40,33 @@ def get_authenticated_service():
             print(f"⚠️ Refresh token failed: {e}. Reauthenticating...")
             creds = None  # Force reauth
 
-    # If no valid creds, do full auth flow
+    # If no valid creds, check if non-interactive mode
     if not creds or not creds.valid:
         if not CLIENT_SECRET.exists():
-            raise FileNotFoundError(f"❌ client_secret.json not found at {CLIENT_SECRET}")
-        print("🔐 Starting new OAuth flow...")
-        flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET, SCOPES)
-        creds = flow.run_local_server(port=0)
-        with open(TOKEN_PATH, "wb") as token_file:
-            pickle.dump(creds, token_file)
-        print("✅ Token saved to disk.")
+            return None
+        # In non-interactive or background environments, do not block on browser prompt
+        try:
+            print("🔐 Attempting OAuth flow...")
+            flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET, SCOPES)
+            creds = flow.run_local_server(port=0, open_browser=False)
+            with open(TOKEN_PATH, "wb") as token_file:
+                pickle.dump(creds, token_file)
+            print("✅ Token saved to disk.")
+        except Exception as e:
+            print(f"⚠️ OAuth interactive flow skipped: {e}")
+            return None
 
-    return build("youtube", "v3", credentials=creds)
+    if creds and creds.valid:
+        return build("youtube", "v3", credentials=creds)
+    return None
 
 def get_recent_video_titles(max_results=200):
     global _cached_titles
     try:
         youtube = get_authenticated_service()
+        if not youtube:
+            _cached_titles = []
+            return []
         titles = []
         next_page_token = None
 

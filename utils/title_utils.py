@@ -16,62 +16,46 @@ def clean_title_for_ffmpeg(title):
     title = re.sub(r'[\'":]', '', title)  # remove quotes and colons
     return title.strip()
 
-GEMINI_FALLBACK_MODELS = [
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.8-flash",
-    "gemini-flash-latest"
+GEMINI_CANDIDATE_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-flash-latest",
+    "gemini-1.5-pro"
 ]
 
-def _get_gemini_model():
-    """
-    Returns a configured GenerativeModel trying the preferred model then fallbacks.
-    """
+def generate_title_with_gemini(text, fallback_title):
     api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        return None
+        return fallback_title
+
     genai.configure(api_key=api_key)
+    match = re.match(r"^\[(.*?)\]\s*(.*)", fallback_title)
+    subreddit = match.group(1) if match else "Reddit"
+    original_title = match.group(2) if match else fallback_title
 
-    preferred = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash").strip()
-    candidates = [preferred] + [m for m in GEMINI_FALLBACK_MODELS if m != preferred]
+    prompt = (
+        f"You're creating a YouTube title for a viral story from r/{subreddit}.\n"
+        "Make it under 60 characters, catchy and clickable.\n"
+        "No emojis, lists, or suggestions. Respond with just the title:\n\n"
+        f"Original Reddit title: {original_title}\n"
+        f"Story snippet: {text[:800]}\n"
+    )
 
-    for model_name in candidates:
-        if not model_name.startswith("models/"):
-            model_name = f"models/{model_name}"
+    models_to_try = [os.environ.get("GEMINI_MODEL", "gemini-2.5-flash").strip()] + [m for m in GEMINI_CANDIDATE_MODELS if m != os.environ.get("GEMINI_MODEL")]
+    for model_name in models_to_try:
         try:
-            return genai.GenerativeModel(model_name=model_name)
+            m = genai.GenerativeModel(model_name=f"models/{model_name}" if not model_name.startswith("models/") else model_name)
+            response = m.generate_content(prompt)
+            if response and response.candidates and response.candidates[0].content.parts:
+                gemini_title = response.candidates[0].content.parts[0].text.strip()
+                cleaned = clean_title_for_ffmpeg(gemini_title)
+                if cleaned:
+                    return f"[{subreddit}] {cleaned}"
         except Exception:
             continue
-    return genai.GenerativeModel(model_name="models/gemini-3.6-flash")
 
-def generate_title_with_gemini(text, fallback_title):
-    try:
-        model = _get_gemini_model()
-        if not model:
-            return fallback_title
-
-        # Extract subreddit prefix (e.g., "[AskReddit]") from the fallback_title
-        match = re.match(r"^\[(.*?)\]\s*(.*)", fallback_title)
-        subreddit = match.group(1) if match else "Reddit"
-        original_title = match.group(2) if match else fallback_title
-
-        prompt = (
-            f"You're creating a YouTube title for a viral story from r/{subreddit}.\n"
-            "Make it under 60 characters, catchy and clickable.\n"
-            "No emojis, lists, or suggestions. Respond with just the title:\n\n"
-            f"Original Reddit title: {original_title}\n"
-            f"Story snippet: {text[:800]}\n"
-        )
-
-        response = model.generate_content(prompt)
-        gemini_title = response.candidates[0].content.parts[0].text.strip()
-        cleaned = clean_title_for_ffmpeg(gemini_title)
-
-        # Re-append the subreddit prefix
-        return f"[{subreddit}] {cleaned or original_title}"
-    except Exception as e:
-        print(f"⚠️ Gemini failed, fallback title used: {e}")
-        return fallback_title
+    return fallback_title
 
 
 def enhance_story_hook_with_gemini(text, subreddit="Reddit"):
@@ -87,30 +71,30 @@ def enhance_story_hook_with_gemini(text, subreddit="Reddit"):
     if not api_key:
         return text
 
-    try:
-        model = _get_gemini_model()
-        if not model:
-            return text
+    genai.configure(api_key=api_key)
+    prompt = (
+        f"You are a viral YouTube Shorts editor adapting a real story from r/{subreddit}.\n"
+        "Task: Rewrite the opening 1-2 sentences of this story into an intense, punchy narrative hook.\n"
+        "Rules:\n"
+        "1. Remove boring intro filler like 'Throwaway account because...', 'Posting from mobile', 'Long time lurker'.\n"
+        "2. Keep the narrator's authentic first-person perspective and exact facts.\n"
+        "3. Output ONLY the complete revised story with your new opening hook seamlessly flowing into the remaining body.\n"
+        "4. Do NOT add meta commentary, quotes, markdown formatting, or emojis.\n\n"
+        f"Original Story:\n{text}"
+    )
 
-        prompt = (
-            f"You are a viral YouTube Shorts editor adapting a real story from r/{subreddit}.\n"
-            "Task: Rewrite the opening 1-2 sentences of this story into an intense, punchy narrative hook.\n"
-            "Rules:\n"
-            "1. Remove boring intro filler like 'Throwaway account because...', 'Posting from mobile', 'Long time lurker'.\n"
-            "2. Keep the narrator's authentic first-person perspective and exact facts.\n"
-            "3. Output ONLY the complete revised story with your new opening hook seamlessly flowing into the remaining body.\n"
-            "4. Do NOT add meta commentary, quotes, markdown formatting, or emojis.\n\n"
-            f"Original Story:\n{text}"
-        )
+    models_to_try = [os.environ.get("GEMINI_MODEL", "gemini-2.5-flash").strip()] + [m for m in GEMINI_CANDIDATE_MODELS if m != os.environ.get("GEMINI_MODEL")]
+    for model_name in models_to_try:
+        try:
+            m = genai.GenerativeModel(model_name=f"models/{model_name}" if not model_name.startswith("models/") else model_name)
+            response = m.generate_content(prompt)
+            if response and response.candidates and response.candidates[0].content.parts:
+                enhanced_text = response.candidates[0].content.parts[0].text.strip()
+                if enhanced_text and len(enhanced_text) >= len(text) * 0.7:
+                    enhanced_text = re.sub(r'[^\x00-\x7F]+', '', enhanced_text).strip()
+                    return enhanced_text
+        except Exception:
+            continue
 
-        response = model.generate_content(prompt)
-        enhanced_text = response.candidates[0].content.parts[0].text.strip()
-        if enhanced_text and len(enhanced_text) >= len(text) * 0.7:
-            # Clean non-ascii artifacts
-            enhanced_text = re.sub(r'[^\x00-\x7F]+', '', enhanced_text).strip()
-            return enhanced_text
-        return text
-    except Exception as e:
-        print(f"⚠️ Gemini hook enhancement fallback: {e}")
-        return text
+    return text
 
