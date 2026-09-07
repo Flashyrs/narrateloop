@@ -1,4 +1,5 @@
 import os
+import time
 import pickle
 from pathlib import Path
 from google.auth.transport.requests import Request
@@ -29,14 +30,16 @@ def generate_title_and_description(story):
     )
     return title, description[:4900], tags
 
-def authenticate_youtube():
+def authenticate_youtube(headless=False, port=8080):
     SCOPES = [
+        "https://www.googleapis.com/auth/youtube.force-ssl",
         "https://www.googleapis.com/auth/youtube.upload",
-        "https://www.googleapis.com/auth/youtube.readonly"
+        "https://www.googleapis.com/auth/youtube"
     ]
     creds = None
-    token_path = "token.pickle"
-    client_secret = Path(os.getenv("YOUTUBE_CLIENT_SECRET", "client_secret.json")).resolve()
+    project_root = Path(__file__).resolve().parent.parent
+    token_path = Path(os.getenv("YOUTUBE_TOKEN_PATH", project_root / "token.pickle")).resolve()
+    client_secret = Path(os.getenv("YOUTUBE_CLIENT_SECRET", project_root / "client_secret.json")).resolve()
 
     if not os.path.exists(client_secret):
         raise FileNotFoundError(f"client_secret.json not found at {client_secret}")
@@ -60,7 +63,10 @@ def authenticate_youtube():
     # If no creds or refresh failed, authenticate again
     if not creds or not creds.valid:
         flow = InstalledAppFlow.from_client_secrets_file(client_secret, SCOPES)
-        creds = flow.run_local_server(port=0)
+        print("🔑 Initiating OAuth authentication...")
+        if headless:
+            print(f"⚠️ Headless mode enabled. Ensure port {port} is forwarded or accessible.")
+        creds = flow.run_local_server(port=port, open_browser=not headless)
         with open(token_path, "wb") as token:
             pickle.dump(creds, token)
         print("🆕 New token generated and saved.")
@@ -85,7 +91,7 @@ def upload_video(file_path, title, description, tags=None, thumbnail_path=None):
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Video file not found: {file_path}")
 
-    media = MediaFileUpload(file_path)
+    media = MediaFileUpload(file_path, chunksize=-1, resumable=True)
 
     response = youtube.videos().insert(
         part="snippet,status",
@@ -95,14 +101,18 @@ def upload_video(file_path, title, description, tags=None, thumbnail_path=None):
 
     if thumbnail_path and os.path.exists(thumbnail_path):
         try:
+            time.sleep(3)  # Brief delay to allow YouTube video processing initialization
+            mime_type = "image/png" if str(thumbnail_path).lower().endswith(".png") else "image/jpeg"
+            thumb_media = MediaFileUpload(thumbnail_path, mimetype=mime_type, resumable=False)
             youtube.thumbnails().set(
                 videoId=response["id"],
-                media_body=MediaFileUpload(thumbnail_path)
+                media_body=thumb_media
             ).execute()
-            print("🖼️ Custom thumbnail set successfully.")
+            print(f"🖼️ Custom thumbnail set successfully ({thumbnail_path}).")
         except Exception as te:
-            print(f"⚠️ Custom thumbnail upload skipped ({te})")
+            print(f"⚠️ Custom thumbnail upload failed ({te})")
 
     video_url = f"https://youtube.com/watch?v={response['id']}"
     print(f"✅ Uploaded: {video_url}")
     return video_url
+
