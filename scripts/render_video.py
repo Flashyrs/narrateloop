@@ -340,7 +340,7 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
     if chosen_music:
         music_idx = current_input_idx
         current_input_idx += 1
-        input_args += ["-stream_loop", "-1", "-i", chosen_music.replace("\\", "/")]
+        input_args += ["-stream_loop", "10", "-i", chosen_music.replace("\\", "/")]
         print(f"[DEBUG] Layering background music: {os.path.basename(chosen_music)}")
 
     # Input (optional): Whoosh transition SFX
@@ -392,7 +392,7 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
         music_base_vol = float(os.getenv("MUSIC_BASE_VOLUME", "0.12"))
         a_filters.append(
             f"[{voice_idx}:a]asplit=2[v_main][v_sc];"
-            f"[{music_idx}:a]volume={music_base_vol:.2f}[m_vol];"
+            f"[{music_idx}:a]atrim=0:{audio_duration:.2f},asetpts=PTS-STARTPTS,volume={music_base_vol:.2f}[m_vol];"
             f"[m_vol][v_sc]sidechaincompress=threshold=0.030:ratio=8:attack=150:release=650:makeup=1[m_ducked]"
         )
         voice_stream_label = "[v_main]"
@@ -432,7 +432,6 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
         "ffmpeg",
         "-y"
     ] + input_args + [
-        "-t", f"{audio_duration:.2f}",
         "-c:v", encoder,
         "-preset", "ultrafast",
         "-crf", "24",
@@ -442,7 +441,7 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart"
     ] + map_args + [
-        "-shortest",
+        "-t", f"{audio_duration:.2f}",
         "-map_metadata", "-1",       # Strip all source metadata
         "-metadata", "title=",        # Remove container title
         "-metadata:s:v:0", "title=",  # Remove video stream title
