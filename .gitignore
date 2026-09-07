@@ -20,6 +20,8 @@ output/
 reddit_stories/
 subtitles/
 logs/
+queue/
+!queue/.gitkeep
 *.log
 
 # Python environment & cache
