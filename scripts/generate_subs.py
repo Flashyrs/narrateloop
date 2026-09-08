@@ -49,18 +49,22 @@ def generate_subs(date_str, story_name, format="short"):
         title_end_time = 0.0
         word_timings = timing_data
 
+    story_format = "standard"
     with open(story_path, "r", encoding="utf-8") as f:
-        story_text = json.load(f).get("text", "")
+        sdata = json.load(f)
+        story_text = sdata.get("text", "")
+        story_format = sdata.get("story_format", "standard")
 
     word_timings = [w for w in word_timings if clean_word(w.get("word", "")) != ""]
     word_timings = sorted(word_timings, key=lambda w: w.get("start", 0))
-    max_duration = 0.4
-    safety_margin = 0.01
 
     if format == "short":
         play_x, play_y, font_size = 1080, 1920, 110
+        # Lower third for Conversation Shorts (below chat cards); Middle of screen for Breakdown & Verdict shorts
+        margin_v = 440 if story_format == "message_short" else 860
     else:
         play_x, play_y, font_size = 1920, 1080, 70
+        margin_v = 100
 
     ass_content = f"""[Script Info]
 ScriptType: v4.00+
@@ -69,14 +73,17 @@ PlayResY: {play_y}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, BackColour, OutlineColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: BoldCenter, Impact, {font_size}, &H00FFFFFF, &H64000000, &H00000000, -1, 0, 0, 0, 100, 100, 0, 0, 1, 4, 0, 5, 0, 0, 0, 1
-Style: EmphasizedRed, Impact, {font_size}, &H000000FF, &H64000000, &H00000000, -1, 0, 0, 0, 100, 100, 0, 0, 1, 4, 0, 5, 0, 0, 0, 1
-Style: RhythmYellow, Impact, {font_size}, &H0000FFFF, &H64000000, &H00000000, -1, 0, 0, 0, 100, 100, 0, 0, 1, 4, 0, 5, 0, 0, 0, 1
+Style: BoldCenter, Impact, {font_size}, &H00FFFFFF, &H64000000, &H00000000, -1, 0, 0, 0, 100, 100, 0, 0, 1, 4, 0, 2, 0, 0, {margin_v}, 1
+Style: EmphasizedRed, Impact, {font_size}, &H000000FF, &H64000000, &H00000000, -1, 0, 0, 0, 100, 100, 0, 0, 1, 4, 0, 2, 0, 0, {margin_v}, 1
+Style: RhythmYellow, Impact, {font_size}, &H0000FFFF, &H64000000, &H00000000, -1, 0, 0, 0, 100, 100, 0, 0, 1, 4, 0, 2, 0, 0, {margin_v}, 1
 
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+
+    # Subtitle threshold: do not overlap over the center card while the card is active
+    card_cutoff = max(0.0, title_end_time - 0.3)
 
     if format == "video":
         i = 0
@@ -89,7 +96,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             end = float(group[-1]["end"])
 
             # Skip subtitle groups that occur during title thumbnail display
-            if start < title_end_time:
+            if start < card_cutoff:
                 i += 3
                 continue
 
@@ -117,28 +124,37 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         for i, word in enumerate(word_timings):
             try:
                 start = float(word["start"])
-                end = float(word["end"])
+                raw_end = float(word["end"])
                 text = clean_word(str(word["word"]))
 
-                if not text or end <= 0 or start < 0:
+                if not text or start < 0:
                     continue
 
-                # Skip words that occur during title card display
-                if start < title_end_time:
+                # Skip words during active title card display
+                if start < card_cutoff:
                     continue
 
+                # Compute fluid word duration without premature disappearing
                 if i + 1 < len(word_timings):
-                    next_start = float(word_timings[i + 1].get("start", end))
-                    end = min(end, next_start - safety_margin)
+                    next_start = float(word_timings[i + 1].get("start", raw_end))
+                    if next_start > start:
+                        end = min(raw_end, next_start - 0.01)
+                        # Cap long pauses between sentences to 1.1s
+                        end = min(end, start + 1.1)
+                    else:
+                        end = max(start + 0.25, raw_end)
+                else:
+                    end = max(start + 0.25, raw_end)
 
-                end = max(start + 0.01, min(end, start + max_duration))
+                if end <= start:
+                    end = start + 0.25
 
                 start_str = seconds_to_ass_time(start)
                 end_str = seconds_to_ass_time(end)
 
                 if is_phrase_emphasized(text, story_text):
                     style = "EmphasizedRed"
-                elif random.random() < 0.33:  # ~33% chance for yellow
+                elif random.random() < 0.35:  # ~35% rhythm highlight
                     style = "RhythmYellow"
                 else:
                     style = "BoldCenter"

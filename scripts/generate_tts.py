@@ -220,11 +220,81 @@ def clean_text_for_tts(text):
 
 
 # ====================================================================
-# MICROSOFT EDGE-TTS GENERATION WITH WORD-LEVEL TIMESTAMPS
+# MULTI-ROLE DUAL-VOICE SYNTHESIS ENGINE (Google Cloud / Edge-TTS)
 # ====================================================================
 
-async def _tts_edge_async(text, out_wav_path, timing_json_path, voice_name, rate, clean_title=""):
-    comm = edge_tts.Communicate(text, voice=voice_name, rate=rate, boundary="WordBoundary")
+def _synthesize_google_segment(text, voice_name="en-US-Journey-D", rate_float=1.22):
+    """
+    Synthesizes text using Google Cloud Text-to-Speech API with high-precision
+    sentence-level chunking to ensure word timestamps never drift.
+    """
+    if not text.strip():
+        return AudioSegment.empty(), []
+
+    from google.cloud import texttospeech
+    cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "google-tts-key.json")
+    if not os.path.isabs(cred_path):
+        cred_path = os.path.join(PROJECT_ROOT, cred_path)
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_path
+
+    client = texttospeech.TextToSpeechClient()
+    lang_code = "-".join(voice_name.split("-")[:2]) if "-" in voice_name else "en-US"
+    voice_params = texttospeech.VoiceSelectionParams(language_code=lang_code, name=voice_name)
+    audio_config = texttospeech.AudioConfig(
+        audio_encoding=texttospeech.AudioEncoding.LINEAR16,
+        speaking_rate=rate_float
+    )
+
+    # Split into short sentence/phrase clauses for pinpoint timing accuracy
+    sentence_chunks = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text.strip()) if s.strip()]
+    if not sentence_chunks:
+        sentence_chunks = [text.strip()]
+
+    combined_audio = AudioSegment.empty()
+    all_words = []
+    current_time = 0.0
+
+    for chunk in sentence_chunks:
+        synthesis_input = texttospeech.SynthesisInput(text=chunk)
+        response = client.synthesize_speech(input=synthesis_input, voice=voice_params, audio_config=audio_config)
+        seg = AudioSegment.from_file(io.BytesIO(response.audio_content), format="wav")
+
+        words_raw = chunk.split()
+        if not words_raw:
+            continue
+            
+        total_chars = max(1, sum(len(w) for w in words_raw))
+        chunk_sec = seg.duration_seconds
+
+        for w in words_raw:
+            w_dur = (len(w) / total_chars) * chunk_sec
+            all_words.append({
+                "word": w,
+                "start": round(current_time, 3),
+                "end": round(current_time + w_dur, 3)
+            })
+            current_time += w_dur
+
+        combined_audio += seg
+        current_time = combined_audio.duration_seconds
+
+    return combined_audio, all_words
+
+def normalize_segment_loudness(seg, target_dBFS=-16.0):
+    """Normalizes an AudioSegment to a consistent target dBFS to ensure all characters have uniform volume."""
+    if len(seg) == 0 or seg.dBFS == float('-inf'):
+        return seg
+    gain = target_dBFS - seg.dBFS
+    # Clamp gain within [-12, +12] dB to prevent distortion or blowing out noise floors
+    gain = max(-12.0, min(12.0, gain))
+    return seg.apply_gain(gain)
+
+async def _synthesize_edge_segment(text, voice_name, rate="+25%"):
+    """Synthesizes an individual text chunk via Edge-TTS and returns (AudioSegment, word_timings_list)."""
+    if not text.strip():
+        return AudioSegment.empty(), []
+
+    comm = edge_tts.Communicate(text.strip(), voice=voice_name, rate=rate, boundary="WordBoundary")
     audio_buffer = bytearray()
     words = []
 
@@ -238,40 +308,230 @@ async def _tts_edge_async(text, out_wav_path, timing_json_path, voice_name, rate
                 "end": round((chunk["offset"] + chunk["duration"]) / 10_000_000, 3)
             })
 
-    # Convert audio stream to clean standard WAV
+    if not audio_buffer:
+        return AudioSegment.empty(), []
+
     seg = AudioSegment.from_file(io.BytesIO(audio_buffer), format="mp3")
-    seg.export(out_wav_path, format="wav")
+    return seg, words
 
-    # Calculate exact timestamp when title finishes speaking
-    title_words = clean_title.split() if clean_title else []
-    title_word_count = len(title_words)
-    title_end_time = 0.0
-    if title_word_count > 0 and len(words) >= title_word_count:
-        title_end_time = words[title_word_count - 1]["end"] + 0.15
-    elif words:
-        title_end_time = min(3.0, words[-1]["end"])
 
-    timing_payload = {
-        "title_end_time": round(title_end_time, 3),
-        "clean_title": clean_title,
-        "words": words
+async def _tts_dual_role_async(story_dict, out_wav_path, timing_json_path, narrator_voice, host_voice, rate):
+    """
+    Synthesizes a 4-part multi-speaker video track with Google Cloud TTS (or Edge-TTS fallback):
+    1. Hook (Host Voice)
+    2. Story (Narrator Voice - gender matched)
+    3. Analysis (Host Voice - thoughtful pacing)
+    4. Debate Question (Host Voice)
+    """
+    hook_text = clean_text_for_tts(story_dict.get("hook", ""))
+    story_text = clean_text_for_tts(story_dict.get("story", story_dict.get("text", "")))
+    analysis_text = clean_text_for_tts(story_dict.get("analysis", ""))
+    debate_text = clean_text_for_tts(story_dict.get("debate_question", ""))
+    
+    raw_title = story_dict.get("title", "")
+    clean_title = re.sub(r"^\[.*?\]\s*", "", raw_title)
+    clean_title = clean_text_for_tts(clean_title)
+
+    engine = os.getenv("TTS_ENGINE", "google").lower()
+    cred_file = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "google-tts-key.json")
+    if not os.path.isabs(cred_file):
+        cred_file = os.path.join(PROJECT_ROOT, cred_file)
+    use_google = (engine == "google" and os.path.exists(cred_file))
+
+    # Google Cloud Voice Mappings
+    google_host_voice = os.getenv("GOOGLE_TTS_HOST_VOICE", "en-US-Journey-D")
+    narrator_gender = story_dict.get("voice", "male")
+    if narrator_gender == "female":
+        google_narrator_voice = os.getenv("GOOGLE_TTS_FEMALE_VOICE", "en-US-Journey-F")
+    else:
+        google_narrator_voice = os.getenv("GOOGLE_TTS_MALE_VOICE", "en-US-Neural2-J")
+
+    # Check if this is a Conversation Short (Slot 1) with structured chat messages
+    is_conv_short = (story_dict.get("story_format") == "message_short" and bool(story_dict.get("chat_messages")))
+    message_timings = []
+
+    if is_conv_short:
+        # Context-aware Contact & Narrator Gender Detection
+        contact_name = story_dict.get("contact_name", "Messages")
+        c_lower = contact_name.lower()
+        male_contact_indicators = ["mark", "dave", "david", "john", "mike", "dan", "charles", "husband", "landlord", "boss", "dad", "father", "brother", "fiance", "fiancé", "groom", "ex-husband"]
+        female_contact_indicators = ["sarah", "emily", "karen", "jessica", "wife", "mom", "mother", "sister", "bride", "fiancee", "fiancée", "bridezilla", "ex-wife"]
+
+        if any(w in c_lower for w in male_contact_indicators):
+            contact_gender = "male"
+            me_gender = "female"
+        elif any(w in c_lower for w in female_contact_indicators):
+            contact_gender = "female"
+            me_gender = "male"
+        else:
+            me_gender = story_dict.get("voice", "female")
+            contact_gender = "male" if me_gender == "female" else "female"
+
+        # Edge-TTS Voice mappings
+        contact_edge = "en-US-GuyNeural" if contact_gender == "male" else "en-US-JennyNeural"
+        me_edge = "en-US-JennyNeural" if me_gender == "female" else "en-US-GuyNeural"
+
+        # Google Cloud Voice mappings
+        contact_google = "en-US-Neural2-J" if contact_gender == "male" else "en-US-Journey-F"
+        me_google = "en-US-Journey-F" if me_gender == "female" else "en-US-Neural2-J"
+
+        # 1. Intro Hook (spoken once by Host Voice)
+        segments_to_build = []
+        if hook_text:
+            intro_content = f"{clean_title}. {hook_text}" if (clean_title and clean_title.lower() not in hook_text.lower()) else (hook_text or clean_title)
+            segments_to_build.append(("hook", intro_content, host_voice, google_host_voice, "+25%", 1.25, -1))
+        elif clean_title:
+            segments_to_build.append(("hook", clean_title, host_voice, google_host_voice, "+25%", 1.25, -1))
+
+        # 2. Individual dialogue messages (Natural, tense dramatic pacing)
+        for m_idx, m in enumerate(story_dict["chat_messages"]):
+            m_text = clean_text_for_tts(m.get("text", ""))
+            if not m_text:
+                continue
+            is_me = m.get("is_me", False) or m.get("sender", "").lower() in ["me", "op", "i"]
+            if is_me:
+                segments_to_build.append(("msg_me", m_text, me_edge, me_google, "+6%", 1.06, m_idx))
+            else:
+                segments_to_build.append(("msg_contact", m_text, contact_edge, contact_google, "+6%", 1.06, m_idx))
+
+        # 3. Closing CTA
+        if debate_text:
+            segments_to_build.append(("debate", debate_text, host_voice, google_host_voice, "+15%", 1.15, -1))
+    else:
+        # Standard Multi-Role Flow (Slots 2 & 3)
+        segments_to_build = []
+        
+        # 1. Intro / Hook
+        if hook_text:
+            intro_content = f"{clean_title}. {hook_text}" if (clean_title and clean_title.lower() not in hook_text.lower()) else (hook_text or clean_title)
+            segments_to_build.append(("hook", intro_content, host_voice, google_host_voice, "+15%", 1.15, -1))
+        elif clean_title:
+            segments_to_build.append(("hook", clean_title, host_voice, google_host_voice, "+15%", 1.15, -1))
+
+        # 2. Main Story Body
+        if story_text:
+            segments_to_build.append(("story", story_text, narrator_voice, google_narrator_voice, "+14%", 1.14, -1))
+
+        # 3. Host Critical Analysis
+        if analysis_text:
+            segments_to_build.append(("analysis", analysis_text, host_voice, google_host_voice, "+12%", 1.12, -1))
+
+        # 4. Closing Debate Question
+        if debate_text:
+            segments_to_build.append(("debate", debate_text, host_voice, google_host_voice, "+15%", 1.15, -1))
+
+    master_audio = AudioSegment.empty()
+    all_words = []
+    milestones = {
+        "title_end_time": 3.0,
+        "story_end_time": 0.0,
+        "analysis_start_time": 0.0,
+        "analysis_end_time": 0.0
     }
 
-    # Save word-level timestamps & title metadata
+    current_offset = 0.0
+    gap = AudioSegment.silent(duration=180)  # 180ms natural pause between speakers
+
+    for item in segments_to_build:
+        role = item[0]
+        text = item[1]
+        e_vname = item[2]
+        g_vname = item[3]
+        e_rate = item[4]
+        g_rate = item[5]
+        m_idx = item[6] if len(item) > 6 else -1
+
+        if not text:
+            continue
+
+        seg, words = AudioSegment.empty(), []
+
+        if use_google:
+            try:
+                seg, words = _synthesize_google_segment(text, voice_name=g_vname, rate_float=g_rate)
+            except Exception as ge:
+                print(f"⚠️ Google Cloud TTS warning for segment {role} ({ge}) ➔ Falling back to Edge-TTS")
+                seg, words = await _synthesize_edge_segment(text, e_vname, e_rate)
+        else:
+            seg, words = await _synthesize_edge_segment(text, e_vname, e_rate)
+
+        if len(seg) == 0:
+            continue
+
+        # Ensure consistent perceived loudness across all voice roles
+        seg = normalize_segment_loudness(seg, target_dBFS=-16.0)
+
+        seg_start = round(current_offset, 3)
+        seg_dur = len(seg) / 1000.0
+        seg_end = round(seg_start + seg_dur, 3)
+
+        if role == "analysis":
+            milestones["analysis_start_time"] = seg_start
+        elif role in ["msg_me", "msg_contact"] and m_idx >= 0:
+            message_timings.append({
+                "msg_idx": m_idx,
+                "start": seg_start,
+                "end": seg_end,
+                "role": role,
+                "text": text
+            })
+
+        # Shift word timestamps by current global audio offset
+        for w in words:
+            all_words.append({
+                "word": w["word"],
+                "start": round(w["start"] + current_offset, 3),
+                "end": round(w["end"] + current_offset, 3),
+                "role": role
+            })
+
+        master_audio += seg + gap
+        current_offset += (len(seg) + len(gap)) / 1000.0
+
+        if role == "hook":
+            milestones["title_end_time"] = round(current_offset - (len(gap) / 1000.0), 3)
+        elif role == "story":
+            milestones["story_end_time"] = round(current_offset - (len(gap) / 1000.0), 3)
+        elif role == "analysis":
+            milestones["analysis_end_time"] = round(current_offset - (len(gap) / 1000.0), 3)
+
+    # Add natural 1.2s end padding so video never ends abruptly
+    end_pad = AudioSegment.silent(duration=1200)
+    master_audio += end_pad
+
+    # Peak normalize master audio for clean broadcast headroom
+    try:
+        from pydub.effects import normalize as pydub_normalize
+        master_audio = pydub_normalize(master_audio, headroom=1.0)
+    except Exception:
+        pass
+
+    # Export master WAV
+    master_audio.export(out_wav_path, format="wav")
+
+    timing_payload = {
+        "title_end_time": milestones["title_end_time"],
+        "story_end_time": milestones["story_end_time"],
+        "analysis_start_time": milestones["analysis_start_time"],
+        "analysis_end_time": milestones["analysis_end_time"],
+        "clean_title": clean_title,
+        "message_timings": message_timings,
+        "words": all_words
+    }
+
     with open(timing_json_path, "w", encoding="utf-8") as f:
         json.dump(timing_payload, f, ensure_ascii=False, indent=2)
 
-    return seg.duration_seconds, len(words)
+    return master_audio.duration_seconds, len(all_words)
+
 
 
 def generate_tts(date_str, story_name):
     """
     Main TTS entrypoint:
     - Reads story JSON
-    - Cleans spoken title (strips [subreddit] and [Part X of Y])
-    - Speaks title first, then body text
-    - Detects gender and selects voice based on subreddit
-    - Generates voiceover and word-level timestamps in seconds
+    - Assigns Host Voice (Authority/Commentary) and Narrator Voice (Gender-matched)
+    - Synthesizes dual-role audio track with word timings
     """
     story_folder = os.path.join(PROJECT_ROOT, "reddit_stories", date_str)
     audio_dir = os.path.join(PROJECT_ROOT, "audio", date_str)
@@ -288,47 +548,56 @@ def generate_tts(date_str, story_name):
     with open(story_path, "r", encoding="utf-8") as f:
         story = json.load(f)
 
-    # 1. Clean spoken title (strip [subreddit] tags so narrator only speaks the title)
-    raw_title = story.get("title", "")
-    clean_title = re.sub(r"^\[.*?\]\s*", "", raw_title)
-    clean_title = re.sub(r"\[Part \d+ of \d+\]", "", clean_title).strip()
-    clean_title = clean_text_for_tts(clean_title)
-
-    # 2. Clean body text
-    raw_body = story.get("text", "").strip().replace("\n", " ")
-    clean_body = clean_text_for_tts(raw_body)
-
-    # 3. Combine: Title spoken first, then body
-    if clean_title:
-        full_text = f"{clean_title}. {clean_body}"
-    else:
-        full_text = clean_body
-
-    # Detect author gender
+    # Detect author gender for narrator voice
     voice_gender = story.get("voice")
     if voice_gender not in ["male", "female"]:
-        combined_text = clean_title + " " + clean_body
+        combined_text = story.get("title", "") + " " + story.get("text", "")
         voice_gender = detect_gender(combined_text)
         story["voice"] = voice_gender
         with open(story_path, "w", encoding="utf-8") as f:
             json.dump(story, f, indent=4, ensure_ascii=False)
 
-    # Select voice based on subreddit & gender
+    # Select narrator voice based on subreddit & gender
     subreddit = story.get("subreddit", "")
     if not subreddit:
         match = re.match(r"^\[(.*?)\]", story.get("title", ""))
         if match:
             subreddit = match.group(1).strip()
 
-    voice_name, rate = get_voice_for_subreddit(subreddit, voice_gender)
+    narrator_voice, rate = get_voice_for_subreddit(subreddit, voice_gender)
+    
+    # Host voice for Commentary/Analysis/Hook (Confident, authoritative podcaster voice)
+    host_voice = os.getenv("HOST_VOICE", "en-US-GuyNeural")
+    if narrator_voice == host_voice and voice_gender == "male":
+        narrator_voice = "en-US-ChristopherNeural"
 
-    log(f"🎙️ [Story {story_name}] Subreddit: r/{subreddit} | Gender: {voice_gender} ➔ Voice: {voice_name} (rate: {rate})", telegram=True)
+    engine = os.getenv("TTS_ENGINE", "google").lower()
+    cred_file = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "google-tts-key.json")
+    if not os.path.isabs(cred_file):
+        cred_file = os.path.join(PROJECT_ROOT, cred_file)
+    use_google = (engine == "google" and os.path.exists(cred_file))
+
+    if use_google:
+        host_disp = os.getenv("GOOGLE_TTS_HOST_VOICE", "en-US-Journey-D")
+        narr_disp = os.getenv("GOOGLE_TTS_FEMALE_VOICE", "en-US-Journey-F") if voice_gender == "female" else os.getenv("GOOGLE_TTS_MALE_VOICE", "en-US-Neural2-J")
+        engine_label = "Google Cloud TTS (Journey/Neural2)"
+    else:
+        host_disp = host_voice
+        narr_disp = narrator_voice
+        engine_label = "Edge-TTS"
+
+    log(f"🎙️ [{engine_label}] [Story {story_name}] Host: {host_disp} | Narrator: {narr_disp} ({voice_gender}) | Subreddit: r/{subreddit}", telegram=True)
 
     start_t = time.time()
-    duration, word_count = asyncio.run(_tts_edge_async(full_text, out_path, timing_path, voice_name, rate, clean_title=clean_title))
+    duration, word_count = asyncio.run(_tts_dual_role_async(
+        story, out_path, timing_path,
+        narrator_voice=narrator_voice,
+        host_voice=host_voice,
+        rate=rate
+    ))
     elapsed = time.time() - start_t
 
-    log(f"✅ [Story {story_name}] Voiceover generated: {duration:.1f}s audio ({word_count} words) in {elapsed:.2f}s!", telegram=True)
+    log(f"✅ [Story {story_name}] Dual-voice audio generated: {duration:.1f}s ({word_count} words) in {elapsed:.2f}s!", telegram=True)
     return out_path
 
 
@@ -342,3 +611,4 @@ if __name__ == "__main__":
         target_names = [sys.argv[2]]
     for name in target_names:
         generate_tts(date_str, story_name=name)
+

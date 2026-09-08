@@ -2,9 +2,13 @@
 .env
 client_secret.json
 token.pickle
+google-tts-key.json
 *.key
 *.key.pub
 *.pem
+
+# Scratch directory
+scratch/
 
 # Heavy gameplay footage & media assets
 assets/gameplays/*

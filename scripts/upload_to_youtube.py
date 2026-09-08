@@ -13,13 +13,13 @@ def generate_title_and_description(story):
     short_description = story.get("text", "").strip().replace("\n", " ")[:200]
 
     if format_type == "short":
-        hashtags = "#shorts #redditstories #aita #askreddit #storytime #NarrateLoop #funny #minecraftshorts #relatable"
+        hashtags = "#shorts #psychology #casestudy #behavioralanalysis #storytime #relationshipadvice #NarrateLoop"
         title = f"{base_title} #shorts"
-        tags = ["shorts", "reddit", "minecraft", "story", "storytime"]
+        tags = ["shorts", "psychology", "behavioral analysis", "case study", "storytime", "relationships", "dilemma"]
     else:
-        hashtags = "#redditstories #aita #askreddit #storytime #NarrateLoop #redditvideos #youtubevideo #relatable"
+        hashtags = "#psychology #casestudy #behavioralanalysis #storytime #relationshipadvice #NarrateLoop #deepdive"
         title = base_title
-        tags = ["reddit", "storytime", "aita", "youtubevideo", "redditstories"]
+        tags = ["psychology", "behavioral analysis", "case study", "storytime", "relationships", "reddit analysis"]
 
     title = title[:100]
     description = (
@@ -84,7 +84,8 @@ def upload_video(file_path, title, description, tags=None, thumbnail_path=None):
             "categoryId": "22"  # "People & Blogs"
         },
         "status": {
-            "privacyStatus": "public"
+            "privacyStatus": "public",
+            "containsSyntheticMedia": True
         }
     }
 

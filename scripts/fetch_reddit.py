@@ -16,7 +16,19 @@ from dotenv import load_dotenv
 from datetime import datetime
 from utils.youtube_utils import is_title_already_uploaded
 from utils.thumbnail_utils import create_reddit_thumbnail
-from utils.title_utils import generate_title_with_gemini, enhance_story_hook_with_gemini
+from utils.title_utils import (
+    generate_title_with_gemini,
+    enhance_story_hook_with_gemini,
+    generate_transformative_script_with_gemini
+)
+from utils.visual_utils import (
+    create_chat_bubble_card,
+    create_paged_chat_card,
+    generate_paged_chat_step_cards,
+    create_quote_callout_card,
+    create_behavioral_analysis_card,
+    create_community_verdict_card
+)
 
 if sys.platform == "win32":
     try:
@@ -50,7 +62,15 @@ DEFAULT_SUBREDDITS = [
     "entitledparents",
     "EntitledPeople",
     "Stories",
-    "offmychest"
+    "offmychest",
+    "textsfromyourex",
+    "ChoosingBeggars",
+    "badroommates",
+    "texts",
+    "creepyPMs",
+    "BestofRedditorUpdates",
+    "raisedbynarcissists",
+    "mildlyinfuriating"
 ]
 
 env_subreddits = os.getenv("SUBREDDITS")
@@ -135,14 +155,15 @@ def trim_story_to_short(text, min_words=100, max_words=550):
     result = " ".join(accumulated).strip()
     return result, len(result.split())
 
-def get_or_create_thumbnail(post_url, title_text, body_text, save_path, subreddit="relationship_advice", format="short"):
+def get_or_create_thumbnail(post_url, title_text, body_text, save_path, subreddit="relationship_advice", format="short", is_conversation=False):
     create_reddit_thumbnail(
         title_text=title_text,
         subreddit=subreddit,
         body_text=body_text,
         output_path=save_path,
         format=format,
-        post_url=post_url
+        post_url=post_url,
+        is_conversation=is_conversation
     )
 
 # --- Persistent Deduplication Memory ---
@@ -342,7 +363,8 @@ def fetch_reddit_posts(target_date=None, replace_story_idx=None):
         multi_sub = "+".join(batch)
         urls = [
             f"https://www.reddit.com/r/{multi_sub}/top/.rss?t=day",
-            f"https://www.reddit.com/r/{multi_sub}/hot/.rss"
+            f"https://www.reddit.com/r/{multi_sub}/hot/.rss",
+            f"https://www.reddit.com/r/{multi_sub}/top/.rss?t=week"
         ]
         for url in urls:
             headers = {
@@ -363,30 +385,33 @@ def fetch_reddit_posts(target_date=None, replace_story_idx=None):
             except Exception as e:
                 print(f"⚠️ RSS fetch warning for r/{multi_sub}: {e}")
 
-        if len(posts_collected) >= 10:
+        if len(posts_collected) >= 15:
             break
 
     # Method 2: Individual Subreddit RSS Fallback
     if len(posts_collected) < 3:
-        print("🌐 Trying individual subreddit RSS feeds...")
+        print("🌐 Trying individual subreddit RSS feeds (weekly top)...")
         for sub in unused_pool:
-            if len(posts_collected) >= 10:
+            if len(posts_collected) >= 15:
                 break
-            url = f"https://www.reddit.com/r/{sub}/top/.rss?t=day"
-            headers = {
-                'User-Agent': random.choice(USER_AGENTS),
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-            }
-            try:
-                res = requests.get(url, headers=headers, timeout=8)
-                if res.status_code == 200 and len(res.text) > 1000:
-                    parsed = parse_reddit_rss_xml(res.text, default_sub=sub)
-                    for candidate in parsed:
-                        if not is_post_duplicate(candidate, used_db):
-                            if not any(p.get("permalink") == candidate["permalink"] for p in posts_collected):
-                                posts_collected.append(candidate)
-            except Exception:
-                pass
+            for timeframe in ["week", "month", "day"]:
+                url = f"https://www.reddit.com/r/{sub}/top/.rss?t={timeframe}"
+                headers = {
+                    'User-Agent': random.choice(USER_AGENTS),
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                }
+                try:
+                    res = requests.get(url, headers=headers, timeout=8)
+                    if res.status_code == 200 and len(res.text) > 1000:
+                        parsed = parse_reddit_rss_xml(res.text, default_sub=sub)
+                        for candidate in parsed:
+                            if not is_post_duplicate(candidate, used_db):
+                                if not any(p.get("permalink") == candidate["permalink"] for p in posts_collected):
+                                    posts_collected.append(candidate)
+                except Exception:
+                    pass
+                if len(posts_collected) >= 6:
+                    break
 
     if not posts_collected:
         raise Exception("❌ No fresh, unseen posts found across all subreddits.")
@@ -429,59 +454,180 @@ def fetch_reddit_posts(target_date=None, replace_story_idx=None):
             break
 
         idx_today = indices_to_populate.pop(0)
+        raw_title = post["title"]
         raw_text = post["text"]
         subreddit = post["subreddit"]
 
-        # AI Hook Transformation: rewrite opening 1-2 sentences for uniqueness & high CTR
-        text = enhance_story_hook_with_gemini(raw_text, subreddit=subreddit)
-        word_count = len(text.split())
-        raw_title = post["title"]
-        title_with_subreddit = f"[{subreddit}] {raw_title}"
-        gemini_title = generate_title_with_gemini(text, title_with_subreddit)
+        # AI Transformative Script based on Slot (1: Message Short, 2: Psychological Case, 3: Moral Dilemma)
+        transform_data = generate_transformative_script_with_gemini(raw_title, raw_text, subreddit=subreddit, slot=idx_today)
+        
+        if transform_data:
+            gemini_title = f"[{subreddit}] {transform_data['title']}" if idx_today != 1 else transform_data['title']
+            hook_text = transform_data.get("hook", "")
+            story_format = transform_data.get("story_format", "short")
+            voice_gender = transform_data.get("voice_gender", "male")
+
+            if story_format == "message_short":
+                chat_messages = transform_data.get("chat_messages", [])
+                contact_name = transform_data.get("contact_name", "Messages")
+                # Spoken script is hook followed by each message text
+                msg_texts = [m.get("text", "") for m in chat_messages if m.get("text")]
+                full_script = f"{hook_text} " + " ".join(msg_texts)
+                full_script = full_script.strip()
+                
+                story = {
+                    "title": gemini_title,
+                    "text": full_script,
+                    "hook": hook_text,
+                    "story_format": "message_short",
+                    "contact_name": contact_name,
+                    "chat_messages": chat_messages,
+                    "voice": voice_gender,
+                    "part": 1,
+                    "total_parts": 1,
+                    "format": "short",
+                    "subreddit": subreddit
+                }
+            elif story_format == "verdict_short":
+                story_body = transform_data.get("story", "")
+                analysis_text = transform_data.get("analysis", "")
+                debate_text = transform_data.get("debate_question", "")
+                full_script = f"{hook_text} {story_body} {analysis_text} {debate_text}".strip()
+                
+                story = {
+                    "title": gemini_title,
+                    "text": full_script,
+                    "hook": hook_text,
+                    "story": story_body,
+                    "analysis": analysis_text,
+                    "story_format": "verdict_short",
+                    "verdict_title": transform_data.get("verdict_title", "WHO IS WRONG?"),
+                    "opt_a": transform_data.get("opt_a", "NOT THE JERK"),
+                    "pct_a": transform_data.get("pct_a", 84),
+                    "opt_b": transform_data.get("opt_b", "AT FAULT"),
+                    "pct_b": transform_data.get("pct_b", 16),
+                    "takeaway": transform_data.get("takeaway", "You do not owe anyone your peace."),
+                    "debate_question": debate_text,
+                    "chat_messages": [],
+                    "red_flags": [],
+                    "voice": voice_gender,
+                    "part": 1,
+                    "total_parts": 1,
+                    "format": "short",
+                    "subreddit": subreddit
+                }
+            else:  # breakdown_short (Slot 2)
+                story_body = transform_data.get("story", "")
+                analysis_text = transform_data.get("analysis", "")
+                debate_text = transform_data.get("debate_question", "")
+                full_script = f"{hook_text} {story_body} {analysis_text} {debate_text}".strip()
+                
+                story = {
+                    "title": gemini_title,
+                    "text": full_script,
+                    "hook": hook_text,
+                    "story": story_body,
+                    "story_format": "breakdown_short",
+                    "analysis": analysis_text,
+                    "debate_question": debate_text,
+                    "key_quote": transform_data.get("key_quote", ""),
+                    "quote_speaker": transform_data.get("quote_speaker", "The Story"),
+                    "red_flags": transform_data.get("red_flags", ["Psychological Boundary", "Hidden Motive", "Emotional Rigidity"]),
+                    "chat_messages": [],
+                    "voice": voice_gender,
+                    "part": 1,
+                    "total_parts": 1,
+                    "format": "short",
+                    "subreddit": subreddit
+                }
+            
+            word_cnt = len(full_script.split())
+            story_content = full_script
+        else:
+            # Fallback if Gemini transformation is offline
+            text = enhance_story_hook_with_gemini(raw_text, subreddit=subreddit)
+            word_count = len(text.split())
+            title_with_subreddit = f"[{subreddit}] {raw_title}"
+            gemini_title = generate_title_with_gemini(text, title_with_subreddit)
+
+            if 90 <= word_count <= 550:
+                story_content = text
+            elif word_count > 550:
+                story_content, _ = trim_story_to_short(text, min_words=200, max_words=550)
+            else:
+                story_content = text
+
+            story_content = append_engagement_cta(story_content)
+            word_cnt = len(story_content.split())
+
+            story = {
+                "title": gemini_title,
+                "text": story_content,
+                "part": 1,
+                "total_parts": 1,
+                "format": "short",
+                "subreddit": subreddit
+            }
 
         raw_permalink = post.get("permalink", "")
         post_url = raw_permalink if raw_permalink.startswith("http") else f"https://www.reddit.com{raw_permalink}"
-
-        # Preserve complete stories that naturally fit within YouTube Shorts
-        if 90 <= word_count <= 550:
-            story_content = text
-            word_cnt = word_count
-        elif word_count > 550:
-            story_content, word_cnt = trim_story_to_short(text, min_words=200, max_words=550)
-        else:
-            story_content = text
-            word_cnt = word_count
-
-        # Add viral engagement CTA question
-        story_content = append_engagement_cta(story_content)
-        word_cnt = len(story_content.split())
-
-        story = {
-            "title": gemini_title,
-            "text": story_content,
-            "part": 1,
-            "total_parts": 1,
-            "format": "short",
-            "subreddit": subreddit
-        }
 
         story_path = os.path.join(out_dir_today, f"story_{idx_today}.json")
         with open(story_path, "w", encoding="utf-8") as f:
             json.dump(story, f, indent=4, ensure_ascii=False)
 
+        # Generate Slot-Specific Visual Graphics
+        try:
+            if story.get("story_format") == "message_short" and story.get("chat_messages"):
+                msgs = story["chat_messages"]
+                cname = story.get("contact_name", "Messages")
+                # Generate step-by-step animation cards for progressive message appearance
+                generate_paged_chat_step_cards(msgs, contact_name=cname, output_dir=out_dir_today, story_name=idx_today)
+                # Also generate 3-message page fallbacks
+                for p_idx in range(0, len(msgs), 3):
+                    page_slice = msgs[p_idx:p_idx+3]
+                    page_path = os.path.join(out_dir_today, f"chat_{idx_today}_p{p_idx // 3}.png")
+                    create_paged_chat_card(page_slice, contact_name=cname, output_path=page_path)
+                chat_path = os.path.join(out_dir_today, f"chat_{idx_today}.png")
+                create_paged_chat_card(msgs[:3], contact_name=cname, output_path=chat_path)
+
+            if story.get("key_quote"):
+                quote_path = os.path.join(out_dir_today, f"quote_{idx_today}.png")
+                create_quote_callout_card(story["key_quote"], speaker=story.get("quote_speaker", "Them"), output_path=quote_path)
+            
+            if story.get("red_flags"):
+                analysis_card_path = os.path.join(out_dir_today, f"analysis_card_{idx_today}.png")
+                create_behavioral_analysis_card(story["red_flags"], output_path=analysis_card_path)
+
+            if story.get("story_format") == "verdict_short":
+                verdict_card_path = os.path.join(out_dir_today, f"verdict_{idx_today}.png")
+                create_community_verdict_card(
+                    verdict_title=story.get("verdict_title", "WHO IS WRONG?"),
+                    opt_a=story.get("opt_a", "NOT THE JERK"),
+                    pct_a=story.get("pct_a", 84),
+                    opt_b=story.get("opt_b", "AT FAULT"),
+                    pct_b=story.get("pct_b", 16),
+                    takeaway=story.get("takeaway", "You do not owe anyone your peace."),
+                    output_path=verdict_card_path
+                )
+        except Exception as vis_err:
+            print(f"⚠️ Contextual visual creation warning for story {idx_today}: {vis_err}")
+
         screenshot_path = os.path.join(out_dir_today, f"thumb_{idx_today}.png")
         try:
-            get_or_create_thumbnail(post_url, gemini_title, story_content, screenshot_path, subreddit=subreddit, format="short")
+            is_conv = (story.get("story_format") == "message_short")
+            get_or_create_thumbnail(post_url, gemini_title, story.get("hook", story_content), screenshot_path, subreddit=subreddit, format="short", is_conversation=is_conv)
         except Exception as thumb_err:
             print(f"⚠️ Thumbnail generation warning for story {idx_today}: {thumb_err}")
 
         # Record in persistent history database
         record_used_post(post, date_str_today, gemini_title, used_db)
-        print(f"🎯 Saved fresh story_{idx_today}.json ({word_cnt} words, r/{subreddit}): {story_path}")
+        print(f"🎯 Saved transformative story_{idx_today}.json ({word_cnt} words, r/{subreddit}): {story_path}")
         shorts_collected += 1
 
     print(f"✅ Saved {shorts_collected} fresh stories for {date_str_today}")
     return date_str_today, shorts_collected
+
 
 if __name__ == "__main__":
     target_d = None

@@ -21,12 +21,14 @@ def regenerate_thumbnails(date_str):
         if os.path.exists(p):
             with open(p, "r", encoding="utf-8") as f:
                 d = json.load(f)
+            is_conv = (d.get("story_format") == "message_short")
             create_reddit_thumbnail(
                 title_text=d.get("title", ""),
                 subreddit=d.get("subreddit", "relationship_advice"),
-                body_text=d.get("text", ""),
+                body_text=d.get("hook", d.get("story", d.get("text", ""))),
                 output_path=thumb_p,
-                format="short"
+                format="short",
+                is_conversation=is_conv
             )
     print(f"✅ All thumbnails regenerated for {date_str}!")
 

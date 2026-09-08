@@ -120,8 +120,8 @@ def render_reddit_card_pil(title_text, subreddit, body_text="", card_width=920):
     """
     pad = 36
     
-    title_font = get_system_font(bold=True, size=44)
-    body_font = get_system_font(bold=False, size=30)
+    title_font = get_system_font(bold=True, size=50)
+    body_font = get_system_font(bold=False, size=28)
     meta_font = get_system_font(bold=True, size=28)
     small_font = get_system_font(bold=False, size=24)
 
@@ -153,7 +153,7 @@ def render_reddit_card_pil(title_text, subreddit, body_text="", card_width=920):
         try:
             line_w = temp_draw.textlength(test_line, font=title_font)
         except Exception:
-            line_w = len(test_line) * 26
+            line_w = len(test_line) * 28
         
         if line_w <= usable_w or not current_line:
             current_line.append(w)
@@ -163,7 +163,7 @@ def render_reddit_card_pil(title_text, subreddit, body_text="", card_width=920):
     if current_line:
         wrapped_title.append(current_line)
 
-    title_height = len(wrapped_title) * 56
+    title_height = len(wrapped_title) * 62
 
     # Body snippet preview (wrapped cleanly)
     wrapped_body = []
@@ -175,7 +175,7 @@ def render_reddit_card_pil(title_text, subreddit, body_text="", card_width=920):
             try:
                 line_w = temp_draw.textlength(test_line, font=body_font)
             except Exception:
-                line_w = len(test_line) * 18
+                line_w = len(test_line) * 16
             if line_w <= usable_w or not b_curr:
                 b_curr.append(w)
             else:
@@ -186,7 +186,7 @@ def render_reddit_card_pil(title_text, subreddit, body_text="", card_width=920):
         if b_curr and len(wrapped_body) < 2:
             wrapped_body.append(b_curr)
 
-    body_height = (len(wrapped_body) * 38) if wrapped_body else 0
+    body_height = (len(wrapped_body) * 36) if wrapped_body else 0
     card_height = pad + 40 + 16 + title_height + (16 + body_height if body_height else 0) + 24 + 48 + pad
 
     # Create transparent card surface
@@ -217,7 +217,7 @@ def render_reddit_card_pil(title_text, subreddit, body_text="", card_width=920):
         sub_len = len(sub_label) * 16
     draw.text((pad + icon_r * 2 + 14 + sub_len + 10, pad + 5), "• 4h ago", font=small_font, fill=(145, 150, 155, 255))
 
-    # Justified Title Rendering (occupies full container width)
+    # Justified Title Rendering (occupies full container width with large 50pt bold font)
     curr_y = pad + icon_r * 2 + 18
     for idx, line_words in enumerate(wrapped_title):
         is_last_line = (idx == len(wrapped_title) - 1)
@@ -239,18 +239,18 @@ def render_reddit_card_pil(title_text, subreddit, body_text="", card_width=920):
                     try:
                         w_len = draw.textlength(w, font=title_font)
                     except Exception:
-                        w_len = len(w) * 26
+                        w_len = len(w) * 28
                     curr_x += w_len + gap
             else:
                 draw.text((pad, curr_y), " ".join(line_words), font=title_font, fill=(245, 245, 248, 255))
-        curr_y += 56
+        curr_y += 62
 
-    # Body snippet (cleanly styled)
+    # Body snippet (cleanly styled with smaller 28pt font for distinct contrast)
     if wrapped_body:
         curr_y += 8
         for line_words in wrapped_body:
-            draw.text((pad, curr_y), " ".join(line_words), font=body_font, fill=(180, 185, 190, 255))
-            curr_y += 38
+            draw.text((pad, curr_y), " ".join(line_words), font=body_font, fill=(185, 192, 200, 255))
+            curr_y += 36
 
     # Upvotes Pill Badge
     curr_y += 18
@@ -263,6 +263,104 @@ def render_reddit_card_pil(title_text, subreddit, body_text="", card_width=920):
     c_w = 175
     draw.rounded_rectangle([c_x, curr_y, c_x + c_w, curr_y + pill_h], radius=23, fill=(45, 48, 52, 255))
     draw.text((c_x + 16, curr_y + 10), "💬 1.4k comments", font=small_font, fill=(175, 180, 185, 255))
+
+    return card
+
+
+def render_conversation_intro_card_pil(title_text, body_text="", card_width=920):
+    """
+    Renders a sleek, minimalist Intro Card for Conversation Shorts:
+    - No subreddit icon, no upvote/comment counts
+    - Vibrant iMessage Tag Pill
+    - Prominent 52pt Bold Title
+    - Subtle 28pt Context Brief
+    """
+    pad = 40
+    title_font = get_system_font(bold=True, size=52)
+    body_font = get_system_font(bold=False, size=28)
+    pill_font = get_system_font(bold=True, size=22)
+
+    title_text = re.sub(r"^\[.*?\]\s*", "", title_text).strip()
+    usable_w = card_width - (pad * 2)
+
+    temp_img = Image.new("RGBA", (1, 1))
+    temp_draw = ImageDraw.Draw(temp_img)
+
+    words = title_text.split()
+    wrapped_title = []
+    current_line = []
+    for w in words:
+        test_line = " ".join(current_line + [w])
+        try:
+            line_w = temp_draw.textlength(test_line, font=title_font)
+        except Exception:
+            line_w = len(test_line) * 30
+        if line_w <= usable_w or not current_line:
+            current_line.append(w)
+        else:
+            wrapped_title.append(current_line)
+            current_line = [w]
+    if current_line:
+        wrapped_title.append(current_line)
+
+    title_height = len(wrapped_title) * 64
+
+    wrapped_body = []
+    if body_text:
+        b_words = body_text.split()
+        b_curr = []
+        for w in b_words:
+            test_line = " ".join(b_curr + [w])
+            try:
+                line_w = temp_draw.textlength(test_line, font=body_font)
+            except Exception:
+                line_w = len(test_line) * 16
+            if line_w <= usable_w or not b_curr:
+                b_curr.append(w)
+            else:
+                wrapped_body.append(b_curr)
+                b_curr = [w]
+                if len(wrapped_body) >= 2:
+                    break
+        if b_curr and len(wrapped_body) < 2:
+            wrapped_body.append(b_curr)
+
+    body_height = (len(wrapped_body) * 36) if wrapped_body else 0
+    card_height = pad + 40 + 20 + title_height + (16 + body_height if body_height else 0) + pad
+
+    card = Image.new("RGBA", (card_width, card_height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(card)
+
+    # Dark modern surface with iOS Blue accent border
+    draw.rounded_rectangle(
+        [0, 0, card_width, card_height],
+        radius=28,
+        fill=(16, 20, 30, 248),
+        outline=(0, 122, 255, 230),
+        width=3
+    )
+
+    # Top Pill Tag
+    pill_text = "iMESSAGE STORY"
+    try:
+        pw = draw.textlength(pill_text, font=pill_font)
+    except Exception:
+        pw = len(pill_text) * 14
+    pill_w = int(pw) + 48
+    pill_h = 40
+    draw.rounded_rectangle([pad, pad, pad + pill_w, pad + pill_h], radius=20, fill=(0, 122, 255, 255))
+    draw.text((pad + (pill_w - int(pw)) // 2, pad + 8), pill_text, font=pill_font, fill=(255, 255, 255, 255))
+
+    curr_y = pad + pill_h + 20
+    for line_words in wrapped_title:
+        draw.text((pad, curr_y), " ".join(line_words), font=title_font, fill=(255, 255, 255, 255))
+        curr_y += 64
+
+    if wrapped_body:
+        curr_y += 8
+        for line_words in wrapped_body:
+            draw.text((pad, curr_y), " ".join(line_words), font=body_font, fill=(175, 185, 200, 255))
+            curr_y += 36
 
     return card
 
@@ -326,12 +424,11 @@ def create_transparent_card_overlay(card_img, canvas_w=1080, canvas_h=1920, form
     return canvas
 
 
-def create_reddit_thumbnail(title_text, subreddit="relationship_advice", body_text="", output_path="thumb.png", format="short", gameplay_path=None, post_url=None):
+def create_reddit_thumbnail(title_text, subreddit="relationship_advice", body_text="", output_path="thumb.png", format="short", gameplay_path=None, post_url=None, is_conversation=False):
     """
     Master thumbnail & card generator using 100% pure PIL:
     1. Extracts a snippet frame from gameplay video as background for the YouTube thumbnail.
-    2. Generates the realistic Reddit UI Dark Mode Card directly in PIL with title, subreddit badge,
-       drop shadow, upvote & comment counters.
+    2. Generates either the Reddit UI Card or the minimalist Conversation Intro Card.
     3. Saves:
        - thumb_{idx}.png (Full composite for YouTube thumbnail upload)
        - card_{idx}.png (1080x1920 transparent card for live moving gameplay video intro overlay)
@@ -342,11 +439,18 @@ def create_reddit_thumbnail(title_text, subreddit="relationship_advice", body_te
     # 1. Background gameplay video snippet frame (for YouTube thumbnail)
     bg_img = extract_gameplay_frame(gameplay_path=gameplay_path, width=w, height=h)
 
-    # 2. Pure PIL Reddit UI Card
-    card_img = render_reddit_card_pil(title_text, subreddit, body_text=body_text, card_width=card_w)
+    # 2. Pure PIL Card (Reddit UI vs Conversation Intro)
+    if is_conversation or subreddit.lower() in ["imessage", "text", "messages", "texts"]:
+        card_img = render_conversation_intro_card_pil(title_text, body_text=body_text, card_width=card_w)
+    else:
+        card_img = render_reddit_card_pil(title_text, subreddit, body_text=body_text, card_width=card_w)
 
-    # 3. Save transparent card overlay (used over live video gameplay during title intro)
-    card_overlay_path = output_path.replace("thumb_", "card_")
+    card_base = os.path.basename(output_path)
+    if "thumb" in card_base:
+        card_filename = card_base.replace("thumb", "card")
+    else:
+        card_filename = f"card_{card_base}"
+    card_overlay_path = os.path.join(os.path.dirname(os.path.abspath(output_path)), card_filename)
     if card_overlay_path != output_path:
         card_canvas = create_transparent_card_overlay(card_img, canvas_w=w, canvas_h=h, format=format)
         os.makedirs(os.path.dirname(os.path.abspath(card_overlay_path)), exist_ok=True)
