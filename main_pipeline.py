@@ -179,12 +179,18 @@ def run_pipeline(upload=False):
 
         if not os.path.exists(output_path) and task_flags.get("render", True):
             try:
-                clip, clip_path = get_next_valid_gameplay()
-                log(f"[{filename}] Rendering with gameplay: {clip}", date_str, telegram=True)
-                render_video(date_str, clip_path, story_index, format=fmt)
+                enable_montage = os.getenv("ENABLE_MONTAGE", "true").strip().lower() in ("true", "1", "yes")
+                if enable_montage:
+                    log(f"[{filename}] Rendering multi-clip gameplay montage...", date_str, telegram=True)
+                    render_video(date_str, story_name=story_index, format=fmt)
+                else:
+                    clip, clip_path = get_next_valid_gameplay()
+                    log(f"[{filename}] Rendering with single gameplay: {clip}", date_str, telegram=True)
+                    render_video(date_str, gameplay_path=clip_path, story_name=story_index, format=fmt)
             except Exception as e:
                 log(f"[{filename}] Error: {e}", date_str, telegram=True)
                 continue
+
 
         if upload and not upload_done and task_flags.get("upload", True):
             already_uploaded = False

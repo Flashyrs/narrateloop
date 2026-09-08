@@ -1,6 +1,6 @@
 import os
 import sys
-
+import datetime
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -170,10 +170,10 @@ def prepare_gameplay_input(audio_duration, specific_clip_path=None):
     target_duration = audio_duration + 5.0  # 5 second buffer for safety
 
     # ----------------------------------------------------
-    # METHOD A: Single Clip Random Offset (when montage disabled or specific clip forced)
+    # METHOD A: Single Clip Random Offset (only when montage is explicitly disabled)
     # ----------------------------------------------------
-    if not enable_montage or (specific_clip_path and os.path.exists(specific_clip_path)):
-        candidate_clip = specific_clip_path if specific_clip_path else random.choice(all_clips)
+    if not enable_montage:
+        candidate_clip = specific_clip_path if (specific_clip_path and os.path.exists(specific_clip_path)) else random.choice(all_clips)
         clip_dur = get_video_duration(candidate_clip)
         max_start = max(0.0, clip_dur - target_duration)
         start_offset = random.uniform(0.0, max_start)
@@ -191,8 +191,13 @@ def prepare_gameplay_input(audio_duration, specific_clip_path=None):
     print(f"[DEBUG] [Method B - YPP Montage] Slicing dynamic 5-8s scenes across gameplay clips...")
     selected_slices = []
     accumulated_duration = 0.0
-    pool = list(all_clips)
+    pool = list(all_clips) if all_clips else ([specific_clip_path] if specific_clip_path else [])
     random.shuffle(pool)
+
+    # If a specific starting clip is preferred, place it at the front of the montage pool
+    if specific_clip_path and os.path.exists(specific_clip_path) and specific_clip_path in pool:
+        pool.remove(specific_clip_path)
+        pool.insert(0, specific_clip_path)
 
     while accumulated_duration < target_duration and pool:
         clip = pool.pop(0)
