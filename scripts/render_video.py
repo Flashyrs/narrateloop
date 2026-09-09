@@ -249,7 +249,7 @@ def build_gameplay_inputs_and_filter(audio_duration, specific_clip_path=None, w=
         filter_str = f"[{base_idx}:v]fps=30,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,setpts=PTS-STARTPTS[gameplay]"
         return inputs, filter_str, 1
 
-    all_clips = get_available_gameplays()
+    all_clips = get_available_gameplay_clips()
     if not all_clips:
         raise FileNotFoundError(f"[ERROR] No gameplay video files found in {GAMEPLAY_DIR}")
 
