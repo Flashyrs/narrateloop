@@ -12,6 +12,7 @@ if sys.platform == "win32":
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+import psutil
 from scripts.telegram_notify import send_telegram_log, should_stop, get_task_flags
 from scripts.fetch_reddit import fetch_reddit_posts
 from scripts.generate_tts import generate_tts
@@ -25,6 +26,33 @@ QUEUE_PATH = os.path.join(PROJECT_ROOT, "queue", "pending.txt")
 REDDIT_DIR = os.path.join(PROJECT_ROOT, "reddit_stories")
 GAMEPLAY_DIR = os.path.join(PROJECT_ROOT, "assets", "gameplays")
 LOG_DIR = os.path.join(PROJECT_ROOT, "logs")
+LOCK_FILE = os.path.join(PROJECT_ROOT, "pipeline.lock")
+
+def acquire_pipeline_lock():
+    """Ensures only a single pipeline instance executes at any given time."""
+    if os.path.exists(LOCK_FILE):
+        try:
+            with open(LOCK_FILE, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if content:
+                    old_pid = int(content)
+                    if psutil.pid_exists(old_pid):
+                        return False
+        except Exception:
+            pass
+    try:
+        with open(LOCK_FILE, "w", encoding="utf-8") as f:
+            f.write(str(os.getpid()))
+        return True
+    except Exception:
+        return True
+
+def release_pipeline_lock():
+    try:
+        if os.path.exists(LOCK_FILE):
+            os.remove(LOCK_FILE)
+    except Exception:
+        pass
 
 active_flags = {
     "tts": True,
@@ -135,91 +163,98 @@ def get_next_valid_gameplay():
     raise Exception("No valid gameplay clip found in queue.")
 
 def run_pipeline(upload=False):
-    start_time = time.time()
-    date_str = get_current_time().strftime("%Y%m%d")
-    cleanup_old_data()
-    refresh_pending_queue()
+    if not acquire_pipeline_lock():
+        log("[Pipeline] Another pipeline instance is already running. Skipping duplicate trigger.")
+        return
 
-    reddit_path = os.path.join(REDDIT_DIR, date_str)
-    if not os.path.exists(reddit_path) or len(os.listdir(reddit_path)) < 3:
-        log("Fetching Reddit stories...", date_str, telegram=True)
-        fetch_reddit_posts()
+    try:
+        start_time = time.time()
+        date_str = get_current_time().strftime("%Y%m%d")
+        cleanup_old_data()
+        refresh_pending_queue()
 
-    story_files = get_story_files(reddit_path)
-    upload_done = False
-    task_flags = get_task_flags()
+        reddit_path = os.path.join(REDDIT_DIR, date_str)
+        if not os.path.exists(reddit_path) or len(os.listdir(reddit_path)) < 3:
+            log("Fetching Reddit stories...", date_str, telegram=True)
+            fetch_reddit_posts()
 
-    for filename in story_files:
-        if should_stop:
-            log(" Processing stopped by user command.", date_str, telegram=True)
-            return
+        story_files = get_story_files(reddit_path)
+        upload_done = False
+        task_flags = get_task_flags()
 
-        story_index = int(re.search(r"story_(\d+)", filename).group(1))
-        with open(os.path.join(reddit_path, filename), encoding="utf-8") as f:
-            story = json.load(f)
+        for filename in story_files:
+            if should_stop:
+                log(" Processing stopped by user command.", date_str, telegram=True)
+                return
 
-        fmt = story.get("format", "short")
-        audio_dir = os.path.join(PROJECT_ROOT, "audio", date_str)
-        output_dir = os.path.join(PROJECT_ROOT, "output", date_str)
-        audio_path = os.path.join(audio_dir, f"voice_{story_index}.wav")
-        subs_path = os.path.join(PROJECT_ROOT, "subtitles", f"{date_str}_{story_index}_{fmt}.ass")
-        output_path = os.path.join(output_dir, f"final_{story_index}.mp4")
-        uploaded_log = os.path.join(output_dir, "uploaded.txt")
+            story_index = int(re.search(r"story_(\d+)", filename).group(1))
+            with open(os.path.join(reddit_path, filename), encoding="utf-8") as f:
+                story = json.load(f)
 
-        os.makedirs(audio_dir, exist_ok=True)
-        os.makedirs(output_dir, exist_ok=True)
+            fmt = story.get("format", "short")
+            audio_dir = os.path.join(PROJECT_ROOT, "audio", date_str)
+            output_dir = os.path.join(PROJECT_ROOT, "output", date_str)
+            audio_path = os.path.join(audio_dir, f"voice_{story_index}.wav")
+            subs_path = os.path.join(PROJECT_ROOT, "subtitles", f"{date_str}_{story_index}_{fmt}.ass")
+            output_path = os.path.join(output_dir, f"final_{story_index}.mp4")
+            uploaded_log = os.path.join(output_dir, "uploaded.txt")
 
-        if not os.path.exists(audio_path) and task_flags.get("tts", True):
-            log(f"[{filename}] Generating TTS...", date_str, telegram=True)
-            generate_tts(date_str, story_index)
+            os.makedirs(audio_dir, exist_ok=True)
+            os.makedirs(output_dir, exist_ok=True)
 
-        if not os.path.exists(subs_path) and task_flags.get("subs", True):
-            log(f"[{filename}] Generating subs ({fmt})...", date_str, telegram=True)
-            generate_subs(date_str, story_index, format=fmt)
+            if not os.path.exists(audio_path) and task_flags.get("tts", True):
+                log(f"[{filename}] Generating TTS...", date_str, telegram=True)
+                generate_tts(date_str, story_index)
 
-        if not os.path.exists(output_path) and task_flags.get("render", True):
-            try:
-                enable_montage = os.getenv("ENABLE_MONTAGE", "true").strip().lower() in ("true", "1", "yes")
-                if enable_montage:
-                    log(f"[{filename}] Rendering multi-clip gameplay montage...", date_str, telegram=True)
-                    render_video(date_str, story_name=story_index, format=fmt)
-                else:
-                    clip, clip_path = get_next_valid_gameplay()
-                    log(f"[{filename}] Rendering with single gameplay: {clip}", date_str, telegram=True)
-                    render_video(date_str, gameplay_path=clip_path, story_name=story_index, format=fmt)
-            except Exception as e:
-                log(f"[{filename}] Error: {e}", date_str, telegram=True)
-                continue
+            if not os.path.exists(subs_path) and task_flags.get("subs", True):
+                log(f"[{filename}] Generating subs ({fmt})...", date_str, telegram=True)
+                generate_subs(date_str, story_index, format=fmt)
+
+            if not os.path.exists(output_path) and task_flags.get("render", True):
+                try:
+                    enable_montage = os.getenv("ENABLE_MONTAGE", "true").strip().lower() in ("true", "1", "yes")
+                    if enable_montage:
+                        log(f"[{filename}] Rendering multi-clip gameplay montage...", date_str, telegram=True)
+                        render_video(date_str, story_name=story_index, format=fmt)
+                    else:
+                        clip, clip_path = get_next_valid_gameplay()
+                        log(f"[{filename}] Rendering with single gameplay: {clip}", date_str, telegram=True)
+                        render_video(date_str, gameplay_path=clip_path, story_name=story_index, format=fmt)
+                except Exception as e:
+                    log(f"[{filename}] Error: {e}", date_str, telegram=True)
+                    continue
 
 
-        if upload and not upload_done and task_flags.get("upload", True):
-            already_uploaded = False
-            if os.path.exists(uploaded_log):
-                with open(uploaded_log, "r") as f:
-                    already_uploaded = any(f"final_{story_index}.mp4" in line for line in f)
+            if upload and not upload_done and task_flags.get("upload", True):
+                already_uploaded = False
+                if os.path.exists(uploaded_log):
+                    with open(uploaded_log, "r") as f:
+                        already_uploaded = any(f"final_{story_index}.mp4" in line for line in f)
 
-            if not already_uploaded:
-                title, description, tags = generate_title_and_description(story)
-                thumbnail_path_png = os.path.join(reddit_path, f"thumb_{story_index}.png")
-                thumbnail_path_jpg = os.path.join(reddit_path, f"thumb_{story_index}.jpg")
-                thumbnail_path = thumbnail_path_png if os.path.exists(thumbnail_path_png) else (
-                    thumbnail_path_jpg if os.path.exists(thumbnail_path_jpg) else None
-                )
-                url = upload_video(output_path, title, description, tags, thumbnail_path=thumbnail_path)
+                if not already_uploaded:
+                    title, description, tags = generate_title_and_description(story)
+                    thumbnail_path_png = os.path.join(reddit_path, f"thumb_{story_index}.png")
+                    thumbnail_path_jpg = os.path.join(reddit_path, f"thumb_{story_index}.jpg")
+                    thumbnail_path = thumbnail_path_png if os.path.exists(thumbnail_path_png) else (
+                        thumbnail_path_jpg if os.path.exists(thumbnail_path_jpg) else None
+                    )
+                    url = upload_video(output_path, title, description, tags, thumbnail_path=thumbnail_path)
 
-                with open(uploaded_log, "a", encoding="utf-8") as f:
-                    f.write(f"final_{story_index}.mp4 | {title} | {url}\n")
-                log(f"[{filename}] Uploaded: {url}", date_str, telegram=True)
-                upload_done = True
-                break
-            elif already_uploaded:
-                log(f"[{filename}] Already uploaded.", date_str)
+                    with open(uploaded_log, "a", encoding="utf-8") as f:
+                        f.write(f"final_{story_index}.mp4 | {title} | {url}\n")
+                    log(f"[{filename}] Uploaded: {url}", date_str, telegram=True)
+                    upload_done = True
+                    break
+                elif already_uploaded:
+                    log(f"[{filename}] Already uploaded.", date_str)
 
-    if upload and not upload_done:
-        log("No pending videos to upload.", date_str, telegram=True)
+        if upload and not upload_done:
+            log("No pending videos to upload.", date_str, telegram=True)
 
-    elapsed = round(time.time() - start_time, 2)
-    send_telegram_log(f"⏳ Startup time: {elapsed} sec")
+        elapsed = round(time.time() - start_time, 2)
+        send_telegram_log(f"⏳ Startup time: {elapsed} sec")
+    finally:
+        release_pipeline_lock()
 
 def run_pipeline_upload_specific(index):
     date_str = get_current_time().strftime("%Y%m%d")

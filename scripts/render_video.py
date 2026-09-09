@@ -510,15 +510,6 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
             badge_path_ffmpeg = badge_path.replace("\\", "/")
             input_args += ["-loop", "1", "-t", f"{audio_duration + 2.0:.2f}", "-i", badge_path_ffmpeg]
 
-    # Input (optional): Background music track (Content-Aware Selection)
-    chosen_music = get_content_aware_music(subreddit=story_subreddit, text=story_text)
-    music_idx = None
-    if chosen_music:
-        music_idx = current_input_idx
-        current_input_idx += 1
-        input_args += ["-stream_loop", "10", "-t", f"{audio_duration + 2.0:.2f}", "-i", chosen_music.replace("\\", "/")]
-        print(f"[DEBUG] Layering background music: {os.path.basename(chosen_music)}")
-
     # Collect SFX events for seamless millisecond-precise pre-mixing
     sfx_events = []
     
@@ -595,13 +586,9 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
     # Progressive Step-by-Step Message / Paged Chat Conversation Overlays
     for stream_item in paged_chat_streams:
         p_idx, p_st, p_et = stream_item[0], stream_item[1], stream_item[2]
-        v_label = f"v_pg_{p_idx}"
         v_out_label = f"v_with_pg_{p_idx}"
         v_filters.append(
-            f"[{p_idx}:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},format=yuva420p[{v_label}]"
-        )
-        v_filters.append(
-            f"{base_v_stream}[{v_label}]overlay=0:0:enable='between(t,{p_st:.2f},{p_et:.2f})':eof_action=pass[{v_out_label}]"
+            f"{base_v_stream}[{p_idx}:v]overlay=0:0:enable='between(t,{p_st:.2f},{p_et:.2f})':eof_action=pass[{v_out_label}]"
         )
         base_v_stream = f"[{v_out_label}]"
 
