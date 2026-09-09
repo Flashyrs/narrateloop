@@ -14,6 +14,8 @@ import math
 from pathlib import Path
 from dotenv import load_dotenv
 from pydub import AudioSegment
+from utils.metrics_utils import ResourceTracker
+from utils.db_utils import record_run_metrics, update_job_stage
 
 load_dotenv()
 
@@ -345,6 +347,7 @@ def get_sfx_file(category="whoosh"):
 
 def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
     print(f"[DEBUG] Starting single-pass render_video for story: {story_name} on date: {date_str}, format: {format}")
+    tracker = ResourceTracker(target_dir=PROJECT_ROOT).start()
 
     audio_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"audio/{date_str}/voice_{story_name}.wav"))
     subtitle_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"subtitles/{date_str}_{story_name}_{format}.ass"))
@@ -724,6 +727,10 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
 
     # Atomic rename to final output path
     os.replace(temp_output_path, output_path)
+
+    metrics, log_str = tracker.finish(output_path=output_path)
+    print(log_str)
+    record_run_metrics(f"{date_str}_{story_name}", "RENDER", metrics, status="SUCCESS")
 
     # Ensure thumbnail exists for YouTube upload
     extracted_thumb_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"reddit_stories/{date_str}/thumb_{story_name}.png"))

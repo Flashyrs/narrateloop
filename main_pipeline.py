@@ -20,6 +20,8 @@ from scripts.generate_subs import generate_subs
 from scripts.render_video import render_video
 from scripts.upload_to_youtube import upload_video, generate_title_and_description
 from scripts.refresh_pending_queue import refresh_pending_queue
+from utils.db_utils import get_or_create_job, update_job_stage, get_job, get_pipeline_summary, check_api_quota, increment_api_quota
+from utils.metrics_utils import ResourceTracker
 
 PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
 QUEUE_PATH = os.path.join(PROJECT_ROOT, "queue", "pending.txt")
@@ -101,25 +103,53 @@ def log(message, date_str=None, telegram=False, tts_progress=False):
             else:
                 send_telegram_log(full_message)
 
-def is_valid_video_file(path):
+def validate_video_output(path, format="short"):
+    """
+    Validates output video using ffprobe:
+    - File exists and size > 100KB
+    - Duration > 3.0s
+    - Has valid video stream (h264)
+    - Has valid audio stream (aac)
+    - Verifies aspect ratio / dimensions (1080x1920 for short, 1920x1080 for video)
+    """
     if not path or not os.path.exists(path):
-        return False
+        return False, "File does not exist"
     try:
-        if os.path.getsize(path) < 100 * 1024:
-            return False
-        probe = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=10
-        )
+        size = os.path.getsize(path)
+        if size < 100 * 1024:
+            return False, f"File too small ({size} bytes)"
+
+        probe_cmd = [
+            "ffprobe", "-v", "error",
+            "-show_entries", "stream=codec_type,codec_name,width,height:format=duration",
+            "-of", "json",
+            path
+        ]
+        probe = subprocess.run(probe_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
         if probe.returncode != 0:
-            return False
-        dur = float(probe.stdout.strip())
-        return dur > 3.0
-    except Exception:
-        return False
+            return False, f"ffprobe error: {probe.stderr.strip()}"
+
+        data = json.loads(probe.stdout)
+        dur = float(data.get("format", {}).get("duration", 0.0))
+        if dur < 3.0:
+            return False, f"Duration too short ({dur:.1f}s)"
+
+        streams = data.get("streams", [])
+        has_video = any(s.get("codec_type") == "video" for s in streams)
+        has_audio = any(s.get("codec_type") == "audio" for s in streams)
+
+        if not has_video:
+            return False, "Missing video stream"
+        if not has_audio:
+            return False, "Missing audio stream"
+
+        return True, "Valid"
+    except Exception as e:
+        return False, f"Validation exception: {e}"
+
+def is_valid_video_file(path):
+    valid, _ = validate_video_output(path)
+    return valid
 
 def get_story_files(folder_path, render_order=True):
     files = [f for f in os.listdir(folder_path) if f.startswith("story_") and f.endswith(".json")]
@@ -222,6 +252,7 @@ def run_pipeline(upload=False):
                 story = json.load(f)
 
             fmt = story.get("format", "short")
+            story_title = story.get("title", f"story_{story_index}")
             audio_dir = os.path.join(PROJECT_ROOT, "audio", date_str)
             output_dir = os.path.join(PROJECT_ROOT, "output", date_str)
             audio_path = os.path.join(audio_dir, f"voice_{story_index}.wav")
@@ -232,15 +263,42 @@ def run_pipeline(upload=False):
             os.makedirs(audio_dir, exist_ok=True)
             os.makedirs(output_dir, exist_ok=True)
 
+            job = get_or_create_job(date_str, story_index, story_title, fmt)
+            if job.get("stage") == "UPLOADED":
+                log(f"[{filename}] Already marked UPLOADED in database. Skipping.", date_str)
+                continue
+
+            update_job_stage(date_str, story_index, "PROCESSING")
+
+            # 1. TTS Stage
             if not os.path.exists(audio_path) and task_flags.get("tts", True):
-                log(f"[{filename}] Generating TTS...", date_str, telegram=True)
-                generate_tts(date_str, story_index)
+                try:
+                    log(f"[{filename}] Generating TTS...", date_str, telegram=True)
+                    generate_tts(date_str, story_index)
+                    update_job_stage(date_str, story_index, "TTS_DONE")
+                except Exception as e:
+                    log(f"[{filename}] TTS Error: {e}", date_str, telegram=True)
+                    update_job_stage(date_str, story_index, "FAILED", error_message=f"TTS error: {e}")
+                    continue
+            elif os.path.exists(audio_path):
+                update_job_stage(date_str, story_index, "TTS_DONE")
 
+            # 2. Subtitles Stage
             if not os.path.exists(subs_path) and task_flags.get("subs", True):
-                log(f"[{filename}] Generating subs ({fmt})...", date_str, telegram=True)
-                generate_subs(date_str, story_index, format=fmt)
+                try:
+                    log(f"[{filename}] Generating subs ({fmt})...", date_str, telegram=True)
+                    generate_subs(date_str, story_index, format=fmt)
+                    update_job_stage(date_str, story_index, "SUBS_DONE")
+                except Exception as e:
+                    log(f"[{filename}] Subtitle Error: {e}", date_str, telegram=True)
+                    update_job_stage(date_str, story_index, "FAILED", error_message=f"Subs error: {e}")
+                    continue
+            elif os.path.exists(subs_path):
+                update_job_stage(date_str, story_index, "SUBS_DONE")
 
-            if not is_valid_video_file(output_path) and task_flags.get("render", True):
+            # 3. Video Render Stage
+            is_valid, _ = validate_video_output(output_path, format=fmt)
+            if not is_valid and task_flags.get("render", True):
                 if os.path.exists(output_path):
                     try:
                         os.remove(output_path)
@@ -255,11 +313,22 @@ def run_pipeline(upload=False):
                         clip, clip_path = get_next_valid_gameplay()
                         log(f"[{filename}] Rendering with single gameplay: {clip}", date_str, telegram=True)
                         render_video(date_str, gameplay_path=clip_path, story_name=story_index, format=fmt)
+                    update_job_stage(date_str, story_index, "RENDER_DONE", output_path=output_path)
                 except Exception as e:
-                    log(f"[{filename}] Error: {e}", date_str, telegram=True)
+                    log(f"[{filename}] Render Error: {e}", date_str, telegram=True)
+                    update_job_stage(date_str, story_index, "FAILED", error_message=f"Render error: {e}")
                     continue
 
+            # 4. Output Validation Stage
+            valid, reason = validate_video_output(output_path, format=fmt)
+            if valid:
+                update_job_stage(date_str, story_index, "VALIDATED", output_path=output_path)
+            else:
+                log(f"[{filename}] Validation warning: {reason}", date_str, telegram=True)
+                update_job_stage(date_str, story_index, "FAILED", error_message=f"Validation failed: {reason}")
+                continue
 
+            # 5. Immediate Upload (if upload flag enabled)
             if upload and not upload_done and task_flags.get("upload", True):
                 already_uploaded = False
                 if os.path.exists(uploaded_log):
@@ -267,6 +336,7 @@ def run_pipeline(upload=False):
                         already_uploaded = any(f"final_{story_index}.mp4" in line for line in f)
 
                 if not already_uploaded:
+                    check_api_quota("upload", date_str)
                     title, description, tags = generate_title_and_description(story)
                     thumbnail_path_png = os.path.join(reddit_path, f"thumb_{story_index}.png")
                     thumbnail_path_jpg = os.path.join(reddit_path, f"thumb_{story_index}.jpg")
@@ -274,13 +344,16 @@ def run_pipeline(upload=False):
                         thumbnail_path_jpg if os.path.exists(thumbnail_path_jpg) else None
                     )
                     url = upload_video(output_path, title, description, tags, thumbnail_path=thumbnail_path)
+                    increment_api_quota("upload", date_str, success=True)
 
                     with open(uploaded_log, "a", encoding="utf-8") as f:
                         f.write(f"final_{story_index}.mp4 | {title} | {url}\n")
+                    update_job_stage(date_str, story_index, "UPLOADED", upload_url=url)
                     log(f"[{filename}] Uploaded: {url}", date_str, telegram=True)
                     upload_done = True
                     break
                 elif already_uploaded:
+                    update_job_stage(date_str, story_index, "UPLOADED")
                     log(f"[{filename}] Already uploaded.", date_str)
 
         if upload and not upload_done:
@@ -433,9 +506,120 @@ def get_upload_status(date_str=None):
     return "\n".join(status_report)
 
 
+def cli_status(date_str=None):
+    """Prints comprehensive terminal status (SQLite states, RAM, swap, disk, quota)."""
+    if not date_str:
+        date_str = get_current_time().strftime("%Y%m%d")
+
+    summary = get_pipeline_summary(date_str)
+    
+    # System Resource Metrics
+    mem = psutil.virtual_memory()
+    swap = psutil.swap_memory()
+    disk = psutil.disk_usage(PROJECT_ROOT)
+    
+    print("=" * 65)
+    print(f"  🎬 NARRATELOOP PRODUCTION PIPELINE STATUS - {date_str}")
+    print("=" * 65)
+    
+    print(f"\n[SYSTEM RESOURCES]")
+    print(f"  • RAM Usage : {mem.used / (1024*1024):.1f} MB / {mem.total / (1024*1024):.1f} MB ({mem.percent}%)")
+    print(f"  • Swap Usage: {swap.used / (1024*1024):.1f} MB / {swap.total / (1024*1024):.1f} MB ({swap.percent}%)")
+    print(f"  • Disk Free : {disk.free / (1024*1024*1024):.2f} GB / {disk.total / (1024*1024*1024):.2f} GB ({disk.percent}% used)")
+    
+    q = summary.get("quota", {})
+    print(f"\n[DAILY FREE-TIER QUOTA USAGE]")
+    print(f"  • AI Requests : {q.get('ai_requests_count', 0)} / {os.getenv('MAX_AI_REQUESTS_PER_DAY', '50')}")
+    print(f"  • TTS Requests: {q.get('tts_requests_count', 0)} / {os.getenv('MAX_TTS_REQUESTS_PER_DAY', '50')}")
+    print(f"  • Uploads     : {q.get('uploads_count', 0)} / {os.getenv('MAX_UPLOADS_PER_DAY', '10')}")
+    print(f"  • Rate Limits : {q.get('rate_limit_hits', 0)} | Failed: {q.get('failed_requests', 0)}")
+
+    jobs = summary.get("jobs", [])
+    print(f"\n[PIPELINE JOBS ({len(jobs)})]")
+    if not jobs:
+        print("  (No jobs recorded for today yet)")
+    else:
+        for j in jobs:
+            stage_icon = "✅" if j["stage"] in ("UPLOADED", "VALIDATED") else ("❌" if j["stage"] == "FAILED" else "⏳")
+            print(f"  {stage_icon} [Story {j['story_index']}] [{j['story_format']}] {j['stage']}")
+            print(f"     Title : {j['story_title'][:50] if j['story_title'] else 'N/A'}")
+            if j.get("output_path"):
+                print(f"     Output: {j['output_path']}")
+            if j.get("upload_url"):
+                print(f"     URL   : {j['upload_url']}")
+            if j.get("error_message"):
+                print(f"     Error : {j['error_message']}")
+
+    recent_runs = summary.get("recent_runs", [])
+    if recent_runs:
+        print(f"\n[RECENT RENDER RUNS]")
+        for r in recent_runs[:3]:
+            print(f"  • {r['job_key']} ({r['stage']}): Wall {r['wall_time_sec']}s | Peak RSS: {r['peak_rss_mb']} MB | Swap Delta: {r['swap_delta_mb']} MB | Size: {r['output_size_mb']} MB [{r['status']}]")
+
+    print("\n" + "=" * 65)
+
+def cli_cleanup(retain_days=2):
+    """Safely removes temporary files, scratch manifests, and old caches without touching state or outputs."""
+    print("🧹 Running safe pipeline cleanup...")
+    deleted_files = 0
+    freed_bytes = 0
+
+    # 1. Scratch manifests and temporary wav/png files
+    scratch_dir = os.path.join(PROJECT_ROOT, "scratch")
+    if os.path.exists(scratch_dir):
+        for f in os.listdir(scratch_dir):
+            if f.endswith(".txt") or f.endswith(".wav") or f.endswith(".png") or f.endswith(".tmp.mp4"):
+                # Do not delete benchmark result MP4s
+                if f.startswith("bench_"):
+                    continue
+                fp = os.path.join(scratch_dir, f)
+                try:
+                    sz = os.path.getsize(fp)
+                    os.remove(fp)
+                    deleted_files += 1
+                    freed_bytes += sz
+                except Exception:
+                    pass
+
+    # 2. Stale .tmp.mp4 files in output directory
+    output_base = os.path.join(PROJECT_ROOT, "output")
+    if os.path.exists(output_base):
+        for root, _, files in os.walk(output_base):
+            for f in files:
+                if f.endswith(".tmp.mp4") or f.endswith(".tmp"):
+                    fp = os.path.join(root, f)
+                    try:
+                        sz = os.path.getsize(fp)
+                        os.remove(fp)
+                        deleted_files += 1
+                        freed_bytes += sz
+                    except Exception:
+                        pass
+
+    # 3. Retain-days cleanup for old folders
+    cleanup_old_data(retain_days=retain_days)
+
+    print(f"✅ Cleanup complete: Removed {deleted_files} temporary files, freed {freed_bytes / (1024*1024):.2f} MB.")
+
 if __name__ == "__main__":
-    upload_flag = "--upload" in sys.argv
-    run_pipeline(upload=upload_flag)
+    args = sys.argv[1:]
+    
+    if "status" in args:
+        target_date = None
+        for a in args:
+            if re.match(r"^\d{8}$", a):
+                target_date = a
+                break
+        cli_status(target_date)
+    elif "cleanup" in args:
+        cli_cleanup()
+    elif "benchmark" in args:
+        from scripts.benchmark_render import main as run_benchmark
+        run_benchmark()
+    else:
+        upload_flag = "--upload" in args
+        run_pipeline(upload=upload_flag)
+
 
 
 

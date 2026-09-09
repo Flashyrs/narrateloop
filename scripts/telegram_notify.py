@@ -126,7 +126,11 @@ def send_telegram_log(message, tts_progress=False):
         return
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    resp = requests.post(url, data={"chat_id": chat_id, "text": message})
+    try:
+        resp = requests.post(url, data={"chat_id": chat_id, "text": message}, timeout=4.0)
+    except Exception as e:
+        print(f"[Telegram] Failed to send log: {e}")
+        return
 
     if tts_progress and resp.ok:
         global _last_edit_message_id, _last_edit_chat_id, _last_progress_text
