@@ -238,41 +238,65 @@ def prepare_gameplay_montage(audio_duration, date_str, story_name, w=1080, h=192
         selected_slices.append((clip, start_pt, slice_len))
         accumulated_duration += slice_len
 
+def build_gameplay_inputs_and_filter(audio_duration, specific_clip_path=None, w=1080, h=1920, base_idx=0):
+    """
+    Builds the FFmpeg CLI input arguments and filtergraph nodes to slice and
+    concatenate gameplay cuts directly inside the master filtergraph, avoiding
+    any intermediate H.264 encode/decode disk cycle.
+    """
+    if specific_clip_path and os.path.exists(specific_clip_path):
+        inputs = ["-i", specific_clip_path.replace("\\", "/")]
+        filter_str = f"[{base_idx}:v]fps=30,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,setpts=PTS-STARTPTS[gameplay]"
+        return inputs, filter_str, 1
+
+    all_clips = get_available_gameplays()
+    if not all_clips:
+        raise FileNotFoundError(f"[ERROR] No gameplay video files found in {GAMEPLAY_DIR}")
+
+    selected_slices = []
+    accumulated_duration = 0.0
+    target_duration = audio_duration + 2.5
+    pool = list(all_clips)
+    random.shuffle(pool)
+
+    while accumulated_duration < target_duration:
+        clip_path = pool.pop(0)
+        dur = get_video_duration(clip_path)
+        slice_len = min(random.uniform(9.0, 14.0), target_duration - accumulated_duration)
+        slice_len = max(3.0, slice_len)
+
+        if dur > slice_len + 4.0:
+            max_in = dur - slice_len - 2.0
+            in_pt = random.uniform(2.0, max_in)
+        else:
+            in_pt = 0.0
+            slice_len = min(dur, slice_len)
+
+        selected_slices.append((clip_path, in_pt, slice_len))
+        accumulated_duration += slice_len
+
         if not pool:
             pool = list(all_clips)
             random.shuffle(pool)
 
-    print(f"[DEBUG] Assembled {len(selected_slices)} dynamic video cuts for pre-stitching (total ~{accumulated_duration:.1f}s)")
+    print(f"[DEBUG] Assembled {len(selected_slices)} gameplay slices for direct filtergraph concatenation (~{accumulated_duration:.1f}s)")
 
-    # Fast 1-pass pre-stitching FFmpeg command
-    m_cmd = ["ffmpeg", "-y"]
+    inputs = []
     v_filters = []
     slice_labels = []
     for k, (clip_path, in_pt, slice_len) in enumerate(selected_slices):
-        m_cmd.extend([
+        stream_idx = base_idx + k
+        inputs.extend([
             "-ss", f"{in_pt:.2f}",
             "-t", f"{slice_len:.2f}",
             "-avoid_negative_ts", "make_zero",
             "-i", clip_path.replace("\\", "/")
         ])
-        v_filters.append(f"[{k}:v]fps=30,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,setpts=PTS-STARTPTS[v_{k}]")
+        v_filters.append(f"[{stream_idx}:v]fps=30,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,setpts=PTS-STARTPTS[v_{k}]")
         slice_labels.append(f"[v_{k}]")
 
-    concat_filter = f"{';'.join(v_filters)};{''.join(slice_labels)}concat=n={len(selected_slices)}:v=1:a=0[outv]"
-    m_cmd.extend([
-        "-filter_complex", concat_filter,
-        "-map", "[outv]",
-        "-c:v", encoder,
-        "-preset", "ultrafast",
-        "-crf", "22",
-        "-threads", "0",
-        "-an",
-        montage_out
-    ])
-    print(f"[DEBUG] Pre-stitching montage video to {montage_out}...")
-    subprocess.run(m_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-    print(f"[SUCCESS] Montage pre-stitched in fast pass: {montage_out}")
-    return montage_out
+    concat_filter = f"{';'.join(v_filters)};{''.join(slice_labels)}concat=n={len(selected_slices)}:v=1:a=0[gameplay]"
+    return inputs, concat_filter, len(selected_slices)
 
 
 _detected_encoder = None
@@ -316,19 +340,20 @@ def get_sfx_file(category="whoosh"):
     ]
     if matches:
         return random.choice(matches)
-    # Fallback to any sfx if specific category missing
     all_sfx = [os.path.join(SFX_DIR, f) for f in files if Path(f).suffix.lower() in {".wav", ".mp3", ".ogg"}]
     return random.choice(all_sfx) if all_sfx else None
 
 def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
-    print(f"[DEBUG] Starting render_video for story: {story_name} on date: {date_str}, format: {format}")
+    print(f"[DEBUG] Starting single-pass render_video for story: {story_name} on date: {date_str}, format: {format}")
 
     audio_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"audio/{date_str}/voice_{story_name}.wav"))
     subtitle_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"subtitles/{date_str}_{story_name}_{format}.ass"))
     output_dir = os.path.join(PROJECT_ROOT, f"output/{date_str}")
     output_path = os.path.abspath(os.path.join(output_dir, f"final_{story_name}.mp4"))
+    scratch_dir = os.path.join(PROJECT_ROOT, "scratch")
 
     os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(scratch_dir, exist_ok=True)
 
     if not os.path.exists(audio_path):
         raise FileNotFoundError(f"[ERROR] Audio file not found: {audio_path}")
@@ -340,24 +365,12 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
 
     w, h = (1080, 1920) if format == "short" else (1920, 1080)
 
-    # Prepare gameplay video montage in fast 1-pass pre-assembly
-    montage_clip_path = prepare_gameplay_montage(audio_duration, date_str, story_name, w=w, h=h, specific_clip_path=gameplay_path)
-
-    # Check if transparent card overlay exists for live gameplay video intro
-    card_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"reddit_stories/{date_str}/card_{story_name}.png"))
-    thumb_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"reddit_stories/{date_str}/thumb_{story_name}.png"))
-    
-    overlay_img_path = None
-    if os.path.exists(card_path):
-        overlay_img_path = card_path
-    elif os.path.exists(thumb_path):
-        overlay_img_path = thumb_path
-
     # Read title duration & analysis milestones from timing JSON
     timing_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"audio/{date_str}/voice_{story_name}_timing.json"))
     title_end_time = 3.0
     analysis_start_time = 0.0
     analysis_end_time = 0.0
+    msg_timings = []
     if os.path.exists(timing_path):
         try:
             with open(timing_path, "r", encoding="utf-8") as f:
@@ -366,6 +379,7 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
                     title_end_time = float(tdata.get("title_end_time", 3.0))
                     analysis_start_time = float(tdata.get("analysis_start_time", 0.0))
                     analysis_end_time = float(tdata.get("analysis_end_time", 0.0))
+                    msg_timings = tdata.get("message_timings", [])
         except Exception:
             pass
 
@@ -386,18 +400,22 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
     def ffmpeg_path(path):
         return path.replace("\\", "/").replace(":", "\\:")
 
-    audio_path_ffmpeg = audio_path.replace("\\", "/")
     subtitle_path_ffmpeg = ffmpeg_path(subtitle_path)
-
     encoder = get_best_video_encoder()
     print(f"[DEBUG] Using video encoder: {encoder}")
 
-    # Build FFmpeg inputs:
-    # Input 0: Pre-stitched gameplay montage video
-    input_args = ["-i", montage_clip_path.replace("\\", "/")]
-    current_input_idx = 1
+    # 1. Gameplay Inputs & Filtergraph Slice/Concat (Stream 0..N-1)
+    g_inputs, g_filter, num_gameplay_streams = build_gameplay_inputs_and_filter(
+        audio_duration, specific_clip_path=gameplay_path, w=w, h=h, base_idx=0
+    )
+    current_input_idx = num_gameplay_streams
+    input_args = list(g_inputs)
 
-    # Input (optional): Title card overlay image
+    # 2. Title Card Overlay Image (Optional)
+    card_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"reddit_stories/{date_str}/card_{story_name}.png"))
+    thumb_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"reddit_stories/{date_str}/thumb_{story_name}.png"))
+    overlay_img_path = card_path if os.path.exists(card_path) else (thumb_path if os.path.exists(thumb_path) else None)
+    
     card_idx = None
     if overlay_img_path:
         card_idx = current_input_idx
@@ -405,10 +423,7 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
         overlay_path_ffmpeg = overlay_img_path.replace("\\", "/")
         input_args += ["-loop", "1", "-t", f"{title_end_time + 2.0:.2f}", "-i", overlay_path_ffmpeg]
 
-    # Input (optional): Progressive Message Steps or Paged Chat Conversation Overlays
-    paged_chat_streams = []
-    
-    # 1. Check if step-by-step progressive animation cards exist
+    # 3. Consolidated Dialogue Timeline Layer (Replaces 16 Separate PNG Overlays)
     step_entries = []
     step_k = 0
     while True:
@@ -419,69 +434,66 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
         else:
             break
 
-    # Read message_timings from timing JSON if available
-    msg_timings = []
-    if os.path.exists(timing_path):
-        try:
-            with open(timing_path, "r", encoding="utf-8") as f:
-                tdata = json.load(f)
-                if isinstance(tdata, dict):
-                    msg_timings = tdata.get("message_timings", [])
-        except Exception:
-            pass
-
-    if step_entries and msg_timings and len(msg_timings) == len(step_entries):
-        for s_i, s_path in enumerate(step_entries):
-            s_idx = current_input_idx
-            current_input_idx += 1
-            input_args += ["-loop", "1", "-t", f"{audio_duration + 2.0:.2f}", "-i", s_path.replace("\\", "/")]
-            m_start = float(msg_timings[s_i]["start"])
-            m_end = float(msg_timings[s_i+1]["start"]) if (s_i + 1 < len(msg_timings)) else (audio_duration - 1.0)
-            paged_chat_streams.append((s_idx, m_start, m_end, (s_i % 3 == 0)))
-    elif step_entries:
-        conv_duration = max(1.0, audio_duration - title_end_time - 2.0)
-        step_dur = conv_duration / float(len(step_entries))
-        for s_i, s_path in enumerate(step_entries):
-            s_idx = current_input_idx
-            current_input_idx += 1
-            input_args += ["-loop", "1", "-t", f"{audio_duration + 2.0:.2f}", "-i", s_path.replace("\\", "/")]
-            s_st = title_end_time + s_i * step_dur
-            s_et = title_end_time + (s_i + 1) * step_dur
-            paged_chat_streams.append((s_idx, s_st, s_et, (s_i % 3 == 0)))
-    else:
-        # Fallback to discrete paged cards
-        paged_chat_entries = []
+    # Fallback to paged cards if step cards not present
+    if not step_entries:
         p_num = 0
         while True:
             p_card_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"reddit_stories/{date_str}/chat_{story_name}_p{p_num}.png"))
             if os.path.exists(p_card_path):
-                paged_chat_entries.append(p_card_path)
+                step_entries.append(p_card_path)
                 p_num += 1
             else:
                 break
-        if paged_chat_entries:
-            num_pages = len(paged_chat_entries)
-            conv_duration = max(1.0, audio_duration - title_end_time)
-            page_dur = conv_duration / float(num_pages)
-            for p_i, p_path in enumerate(paged_chat_entries):
-                p_idx = current_input_idx
-                current_input_idx += 1
-                input_args += ["-loop", "1", "-t", f"{audio_duration + 2.0:.2f}", "-i", p_path.replace("\\", "/")]
-                p_st = title_end_time + p_i * page_dur
-                p_et = title_end_time + (p_i + 1) * page_dur
-                paged_chat_streams.append((p_idx, p_st, p_et, True))
-        else:
-            # Fallback to single chat overlay if paged cards not present
-            chat_card_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"reddit_stories/{date_str}/chat_{story_name}.png"))
-            chat_start = title_end_time
-            chat_end = min(analysis_start_time - 3.0, title_end_time + 14.0) if analysis_start_time > 0 else (title_end_time + 12.0)
-            if os.path.exists(chat_card_path) and chat_end > chat_start + 2.0:
-                c_idx = current_input_idx
-                current_input_idx += 1
-                input_args += ["-loop", "1", "-t", f"{audio_duration + 2.0:.2f}", "-i", chat_card_path.replace("\\", "/")]
-                paged_chat_streams.append((c_idx, chat_start, chat_end, True))
 
-    # Input (optional): Pivotal Quote Card Overlay (Slot 2)
+    dialogue_idx = None
+    dialogue_sfx_timestamps = []
+    if step_entries:
+        blank_png = os.path.join(scratch_dir, "blank_transparent.png")
+        if not os.path.exists(blank_png):
+            from PIL import Image
+            img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            img.save(blank_png)
+
+        t_first = float(msg_timings[0]["start"]) if (msg_timings and len(msg_timings) == len(step_entries)) else title_end_time
+        txt_path = os.path.join(scratch_dir, f"dialogue_timeline_{date_str}_{story_name}.txt")
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write("ffconcat version 1.0\n")
+            f.write(f"file '{blank_png.replace(chr(92), '/')}'\n")
+            f.write(f"duration {max(0.1, t_first):.2f}\n")
+            
+            for s_i, s_p in enumerate(step_entries):
+                if msg_timings and len(msg_timings) == len(step_entries):
+                    m_start = float(msg_timings[s_i]["start"])
+                    m_end = float(msg_timings[s_i+1]["start"]) if (s_i + 1 < len(msg_timings)) else (audio_duration)
+                else:
+                    conv_dur = max(1.0, audio_duration - title_end_time)
+                    s_dur = conv_dur / float(len(step_entries))
+                    m_start = title_end_time + s_i * s_dur
+                    m_end = title_end_time + (s_i + 1) * s_dur
+                
+                dur = max(0.1, m_end - m_start)
+                f.write(f"file '{s_p.replace(chr(92), '/')}'\n")
+                f.write(f"duration {dur:.2f}\n")
+                dialogue_sfx_timestamps.append(m_start)
+            
+            # Repeat last entry per ffconcat specification
+            f.write(f"file '{step_entries[-1].replace(chr(92), '/')}'\n")
+
+        dialogue_idx = current_input_idx
+        current_input_idx += 1
+        input_args += ["-f", "concat", "-safe", "0", "-i", txt_path.replace("\\", "/")]
+    else:
+        # Fallback to single chat overlay if present
+        chat_card_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"reddit_stories/{date_str}/chat_{story_name}.png"))
+        chat_start = title_end_time
+        chat_end = min(analysis_start_time - 3.0, title_end_time + 14.0) if analysis_start_time > 0 else (title_end_time + 12.0)
+        if os.path.exists(chat_card_path) and chat_end > chat_start + 2.0:
+            dialogue_idx = current_input_idx
+            current_input_idx += 1
+            input_args += ["-loop", "1", "-t", f"{audio_duration + 2.0:.2f}", "-i", chat_card_path.replace("\\", "/")]
+            dialogue_sfx_timestamps.append(chat_start)
+
+    # 4. Contextual Quote Card Overlay (Slot 2)
     quote_idx = None
     quote_card_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"reddit_stories/{date_str}/quote_{story_name}.png"))
     quote_start = max(title_end_time + 6.0, analysis_start_time - 6.5) if analysis_start_time > 0 else (title_end_time + 8.0)
@@ -491,7 +503,7 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
         current_input_idx += 1
         input_args += ["-loop", "1", "-t", f"{audio_duration + 2.0:.2f}", "-i", quote_card_path.replace("\\", "/")]
 
-    # Input (optional): Psychological Red Flags Analysis Card Overlay (Slot 2)
+    # 5. Contextual Psychological Analysis Card (Slot 2)
     analysis_card_idx = None
     analysis_card_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"reddit_stories/{date_str}/analysis_card_{story_name}.png"))
     ac_start = analysis_start_time
@@ -501,7 +513,7 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
         current_input_idx += 1
         input_args += ["-loop", "1", "-t", f"{audio_duration + 2.0:.2f}", "-i", analysis_card_path.replace("\\", "/")]
 
-    # Input (optional): Community Verdict Card Overlay (Slot 3)
+    # 6. Contextual Community Verdict Card (Slot 3)
     verdict_idx = None
     verdict_card_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"reddit_stories/{date_str}/verdict_{story_name}.png"))
     v_start = title_end_time + max(4.0, (audio_duration - title_end_time) * 0.35)
@@ -511,7 +523,7 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
         current_input_idx += 1
         input_args += ["-loop", "1", "-t", f"{audio_duration + 2.0:.2f}", "-i", verdict_card_path.replace("\\", "/")]
 
-    # Input (optional): Premium Breakdown Graphic Badge
+    # 7. Breakdown Graphic Badge (Slot 2)
     badge_idx = None
     if analysis_start_time > 0 and analysis_end_time > analysis_start_time:
         badge_path = os.path.join(PROJECT_ROOT, "assets", "breakdown_badge.png")
@@ -526,44 +538,36 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
             badge_path_ffmpeg = badge_path.replace("\\", "/")
             input_args += ["-loop", "1", "-t", f"{audio_duration + 2.0:.2f}", "-i", badge_path_ffmpeg]
 
-    # Collect SFX events for seamless millisecond-precise pre-mixing
+    # 8. SFX Events Pre-Mixing
     sfx_events = []
-    
-    # 1. Card exit whoosh SFX
     whoosh_file = get_sfx_file("whoosh")
     if card_idx is not None and whoosh_file and os.path.exists(whoosh_file):
         sfx_events.append((whoosh_file, max(0.0, title_end_time - 0.3), 0.35))
 
-    # 2. Paged Chat Pops SFX
     pop_file = get_sfx_file("pop")
-    if paged_chat_streams and pop_file and os.path.exists(pop_file):
-        for stream_item in paged_chat_streams:
-            p_st = stream_item[1]
+    if dialogue_sfx_timestamps and pop_file and os.path.exists(pop_file):
+        for p_st in dialogue_sfx_timestamps:
             sfx_events.append((pop_file, p_st, 0.30))
 
-    # 3. Breakdown Badge Pop SFX
     if badge_idx is not None and pop_file and os.path.exists(pop_file):
         sfx_events.append((pop_file, max(0.0, analysis_start_time), 0.40))
 
-    # 4. Community Verdict Chime SFX
     chime_file = get_sfx_file("chimes") or get_sfx_file("click") or pop_file
     if verdict_idx is not None and chime_file and os.path.exists(chime_file):
         sfx_events.append((chime_file, max(0.0, v_start), 0.35))
 
-    # 5. Debate CTA Attention Chime / Click SFX
     if analysis_end_time > 0 and chime_file and os.path.exists(chime_file):
         sfx_events.append((chime_file, max(0.0, analysis_end_time), 0.25))
 
-    # Pre-mix voice and all SFX with pydub (guarantees rock-solid uniform voice loudness)
-    temp_mixed_voice_path = os.path.join(PROJECT_ROOT, "scratch", f"mixed_voice_{date_str}_{story_name}.wav")
+    temp_mixed_voice_path = os.path.join(scratch_dir, f"mixed_voice_{date_str}_{story_name}.wav")
     final_voice_path = mix_voice_and_sfx(audio_path, sfx_events, temp_mixed_voice_path)
-    
-    # Add final mixed voice audio track to FFmpeg inputs
+
+    # 9. Voice Audio Track Input
     voice_idx = current_input_idx
     current_input_idx += 1
     input_args += ["-i", final_voice_path.replace("\\", "/")]
 
-    # Input (optional): Background music track (Content-Aware Selection)
+    # 10. Content-Aware Background Music Input
     chosen_music = get_content_aware_music(subreddit=story_subreddit, text=story_text)
     music_idx = None
     if chosen_music:
@@ -573,11 +577,9 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
         print(f"[DEBUG] Layering background music: {os.path.basename(chosen_music)}")
 
     # ----------------------------------------------------
-    # Video Filter Graph Construction (Multi-Input Concat + Overlays + Subs)
+    # Consolidated Master Filtergraph Construction
     # ----------------------------------------------------
-    v_filters = [
-        "[0:v]null[gameplay]"
-    ]
+    v_filters = [g_filter]
 
     # Card Overlay (Title Intro)
     if card_idx is not None:
@@ -587,20 +589,17 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
             f"[{card_idx}:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},format=yuva420p,fade=t=out:st={fade_st:.2f}:d={fade_d:.2f}:alpha=1[card]"
         )
         v_filters.append(
-            f"[gameplay][card]overlay=0:0:enable='between(t,0,{title_end_time:.2f})':eof_action=pass[v_merged]"
+            f"[gameplay][card]overlay=0:0:enable='between(t,0,{title_end_time:.2f})':eof_action=pass[v_card]"
         )
-        base_v_stream = "[v_merged]"
+        base_v_stream = "[v_card]"
     else:
         base_v_stream = "[gameplay]"
 
-    # Progressive Step-by-Step Message / Paged Chat Conversation Overlays
-    for stream_item in paged_chat_streams:
-        p_idx, p_st, p_et = stream_item[0], stream_item[1], stream_item[2]
-        v_out_label = f"v_with_pg_{p_idx}"
-        v_filters.append(
-            f"{base_v_stream}[{p_idx}:v]overlay=0:0:enable='between(t,{p_st:.2f},{p_et:.2f})':eof_action=pass[{v_out_label}]"
-        )
-        base_v_stream = f"[{v_out_label}]"
+    # Dialogue Layer (Single Stream Overlay)
+    if dialogue_idx is not None:
+        v_filters.append(f"[{dialogue_idx}:v]format=yuva420p[dialogue_stream]")
+        v_filters.append(f"{base_v_stream}[dialogue_stream]overlay=0:0:eof_action=pass[v_dialogue]")
+        base_v_stream = "[v_dialogue]"
 
     # Contextual Quote Callout Overlay
     if quote_idx is not None:
@@ -638,7 +637,7 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
         )
         base_v_stream = "[v_with_verdict]"
 
-    # Graphical Breakdown Badge Overlay with smooth fade-in and fade-out
+    # Graphical Breakdown Badge Overlay
     if badge_idx is not None:
         b_fade_d = 0.25
         b_fade_in = analysis_start_time
@@ -653,12 +652,10 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
         )
         base_v_stream = "[v_analyzed]"
 
-    # Subtitles layer on top of all visual elements
+    # Subtitles Layer
     v_filters.append(f"{base_v_stream}subtitles='{subtitle_path_ffmpeg}'[v_out]")
 
-    # ----------------------------------------------------
-    # Audio Filter Graph: Dynamic Ducking (Rock-Solid Constant Volume Matching Short 2 & 3)
-    # ----------------------------------------------------
+    # Audio Filter Graph with Sidechain Ducking
     voice_vol = float(os.getenv("VOICE_BASE_VOLUME", "0.22"))
     a_filters = []
     if music_idx is not None:
@@ -676,7 +673,6 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
 
     full_filter_complex = ";".join(v_filters) + ";" + ";".join(a_filters)
     map_args = ["-filter_complex", full_filter_complex, "-map", "[v_out]", "-map", "[a_out]"]
-
     threads_count = os.getenv("FFMPEG_THREADS", "0")
 
     temp_output_path = output_path + ".tmp.mp4"
@@ -703,7 +699,7 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
         temp_output_path
     ]
 
-    print(f"[DEBUG] Running FFmpeg command:\n{' '.join(cmd)}")
+    print(f"[DEBUG] Running Single-Pass FFmpeg Master Command:\n{' '.join(cmd)}")
 
     try:
         result = subprocess.run(
@@ -713,8 +709,6 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
             text=True,
             check=True
         )
-        print(f"[DEBUG] FFmpeg STDOUT:\n{result.stdout}")
-        print(f"[DEBUG] FFmpeg STDERR:\n{result.stderr}")
     except subprocess.CalledProcessError as e:
         if os.path.exists(temp_output_path):
             try:
@@ -731,11 +725,10 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
     # Atomic rename to final output path
     os.replace(temp_output_path, output_path)
 
-    # Ensure thumbnail exists for YouTube upload (preserve pristine PIL card composite)
+    # Ensure thumbnail exists for YouTube upload
     extracted_thumb_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"reddit_stories/{date_str}/thumb_{story_name}.png"))
     if not os.path.exists(extracted_thumb_path):
         try:
-            # Fallback extraction from video intro during title display
             extract_time = f"{max(0.2, min(1.0, title_end_time * 0.4)):.2f}"
             extract_cmd = [
                 "ffmpeg", "-y",
@@ -759,4 +752,5 @@ if __name__ == "__main__":
     target_date = sys.argv[1] if len(sys.argv) > 1 else datetime.now().strftime("%Y%m%d")
     story_idx = sys.argv[2] if len(sys.argv) > 2 else "1"
     render_video(target_date, story_name=story_idx)
+
 

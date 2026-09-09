@@ -217,8 +217,10 @@ def get_upload_schedule():
     custom_times = os.getenv("UPLOAD_TIMES")
     if custom_times:
         times = [t.strip() for t in custom_times.split(",") if t.strip()]
+        if len(times) == 3:
+            return {times[0]: 2, times[1]: 3, times[2]: 1}
         return {t: i + 1 for i, t in enumerate(times)}
-    return {"10:00": 1, "16:00": 2, "21:00": 3}
+    return {"10:00": 2, "16:00": 3, "21:00": 1}
 
 def schedule_uploads():
     from main_pipeline import run_pipeline_upload_specific, run_pipeline  

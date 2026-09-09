@@ -121,9 +121,19 @@ def is_valid_video_file(path):
     except Exception:
         return False
 
-def get_story_files(folder_path):
+def get_story_files(folder_path, render_order=True):
     files = [f for f in os.listdir(folder_path) if f.startswith("story_") and f.endswith(".json")]
-    files.sort(key=lambda name: int(re.search(r"story_(\d+)", name).group(1)))
+    if render_order:
+        # Prioritize faster shorts (2, 3) first, rendering heavier multi-step chat (1) last
+        def priority_key(name):
+            match = re.search(r"story_(\d+)", name)
+            if match:
+                idx = int(match.group(1))
+                return 999 if idx == 1 else idx
+            return 0
+        files.sort(key=priority_key)
+    else:
+        files.sort(key=lambda name: int(re.search(r"story_(\d+)", name).group(1)))
     return files
 
 def cleanup_old_data(retain_days=2):
