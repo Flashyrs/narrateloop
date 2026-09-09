@@ -669,9 +669,16 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
 
     threads_count = os.getenv("FFMPEG_THREADS", "0")
 
+    temp_output_path = output_path + ".tmp.mp4"
+    if os.path.exists(temp_output_path):
+        try:
+            os.remove(temp_output_path)
+        except Exception:
+            pass
+
     cmd = [
         "ffmpeg",
-        "-y"
+        "-y",
     ] + input_args + [
         "-c:v", encoder,
         "-preset", "ultrafast",
@@ -683,7 +690,7 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
         "-movflags", "+faststart"
     ] + map_args + [
         "-t", f"{audio_duration:.2f}",
-        output_path
+        temp_output_path
     ]
 
     print(f"[DEBUG] Running FFmpeg command:\n{' '.join(cmd)}")
@@ -699,12 +706,20 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
         print(f"[DEBUG] FFmpeg STDOUT:\n{result.stdout}")
         print(f"[DEBUG] FFmpeg STDERR:\n{result.stderr}")
     except subprocess.CalledProcessError as e:
+        if os.path.exists(temp_output_path):
+            try:
+                os.remove(temp_output_path)
+            except Exception:
+                pass
         error_msg = f"[ERROR] FFmpeg failed with exit code {e.returncode}:\n{e.stderr}"
         print(error_msg)
         raise RuntimeError(error_msg)
 
-    if not os.path.exists(output_path):
-        raise FileNotFoundError(f"[ERROR] Output video not created at: {output_path}")
+    if not os.path.exists(temp_output_path) or os.path.getsize(temp_output_path) < 100 * 1024:
+        raise FileNotFoundError(f"[ERROR] Output video not created or too small at: {temp_output_path}")
+
+    # Atomic rename to final output path
+    os.replace(temp_output_path, output_path)
 
     # Ensure thumbnail exists for YouTube upload (preserve pristine PIL card composite)
     extracted_thumb_path = os.path.abspath(os.path.join(PROJECT_ROOT, f"reddit_stories/{date_str}/thumb_{story_name}.png"))

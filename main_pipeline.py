@@ -101,6 +101,26 @@ def log(message, date_str=None, telegram=False, tts_progress=False):
             else:
                 send_telegram_log(full_message)
 
+def is_valid_video_file(path):
+    if not path or not os.path.exists(path):
+        return False
+    try:
+        if os.path.getsize(path) < 100 * 1024:
+            return False
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10
+        )
+        if probe.returncode != 0:
+            return False
+        dur = float(probe.stdout.strip())
+        return dur > 3.0
+    except Exception:
+        return False
+
 def get_story_files(folder_path):
     files = [f for f in os.listdir(folder_path) if f.startswith("story_") and f.endswith(".json")]
     files.sort(key=lambda name: int(re.search(r"story_(\d+)", name).group(1)))
@@ -210,7 +230,12 @@ def run_pipeline(upload=False):
                 log(f"[{filename}] Generating subs ({fmt})...", date_str, telegram=True)
                 generate_subs(date_str, story_index, format=fmt)
 
-            if not os.path.exists(output_path) and task_flags.get("render", True):
+            if not is_valid_video_file(output_path) and task_flags.get("render", True):
+                if os.path.exists(output_path):
+                    try:
+                        os.remove(output_path)
+                    except Exception:
+                        pass
                 try:
                     enable_montage = os.getenv("ENABLE_MONTAGE", "true").strip().lower() in ("true", "1", "yes")
                     if enable_montage:
