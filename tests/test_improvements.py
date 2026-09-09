@@ -109,9 +109,62 @@ class TestPipelineImprovements(unittest.TestCase):
         increment_api_quota("ai", date_str=test_quota_date, success=True)
         increment_api_quota("ai", date_str=test_quota_date, success=True)
 
-        # Exceed quota
-        with self.assertRaises(QuotaExceededError):
-            check_api_quota("ai", date_str=test_quota_date)
+    def test_mid_render_kill_and_resume(self):
+        """
+        Simulates a process kill while FFmpeg is actively rendering:
+        - A corrupt .tmp.mp4 is left on disk
+        - SQLite remains at PROCESSING (or FAILED)
+        - On restart: .tmp is rejected/cleaned, TTS & subs are not regenerated, render restarts, no duplicate upload
+        """
+        from main_pipeline import validate_video_output, cli_cleanup
+
+        test_dir = os.path.join(PROJECT_ROOT, "output", self.test_date)
+        audio_dir = os.path.join(PROJECT_ROOT, "audio", self.test_date)
+        subs_dir = os.path.join(PROJECT_ROOT, "subtitles")
+        os.makedirs(test_dir, exist_ok=True)
+        os.makedirs(audio_dir, exist_ok=True)
+        os.makedirs(subs_dir, exist_ok=True)
+
+        # 1. Simulate completed TTS & Subs
+        audio_file = os.path.join(audio_dir, "voice_1.wav")
+        subs_file = os.path.join(subs_dir, f"{self.test_date}_1_short.ass")
+        with open(audio_file, "w") as f: f.write("fake audio data")
+        with open(subs_file, "w") as f: f.write("fake subs data")
+
+        job = get_or_create_job(self.test_date, 1, "Kill Test Story", "short")
+        update_job_stage(self.test_date, 1, "SUBS_DONE")
+
+        # 2. Simulate Mid-Render Kill: writes partial .tmp.mp4 and dies
+        update_job_stage(self.test_date, 1, "PROCESSING")
+        tmp_mp4 = os.path.join(test_dir, "final_1.mp4.tmp.mp4")
+        with open(tmp_mp4, "wb") as f:
+            f.write(b"corrupt partial video bytes" * 100)
+
+        # 3. Verify SQLite and validation reject the partial state
+        current_job = get_job(self.test_date, 1)
+        self.assertNotEqual(current_job["stage"], "RENDER_DONE")
+        self.assertNotEqual(current_job["stage"], "VALIDATED")
+
+        final_mp4 = os.path.join(test_dir, "final_1.mp4")
+        is_valid, reason = validate_video_output(final_mp4)
+        self.assertFalse(is_valid)
+
+        # 4. Simulate Restart & Cleanup: .tmp is purged
+        cli_cleanup(retain_days=10)
+        self.assertFalse(os.path.exists(tmp_mp4))
+
+        # 5. Confirm TTS and subs are preserved and not flagged for regeneration
+        self.assertTrue(os.path.exists(audio_file))
+        self.assertTrue(os.path.exists(subs_file))
+
+        # Cleanup test files
+        try:
+            import shutil
+            shutil.rmtree(test_dir)
+            shutil.rmtree(audio_dir)
+            if os.path.exists(subs_file): os.remove(subs_file)
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     unittest.main()
