@@ -667,7 +667,7 @@ def render_video(date_str, gameplay_path=None, story_name=1, format="short"):
     full_filter_complex = ";".join(v_filters) + ";" + ";".join(a_filters)
     map_args = ["-filter_complex", full_filter_complex, "-map", "[v_out]", "-map", "[a_out]"]
 
-    threads_count = "2" if encoder == "libx264" else "0"
+    threads_count = os.getenv("FFMPEG_THREADS", "0")
 
     cmd = [
         "ffmpeg",
