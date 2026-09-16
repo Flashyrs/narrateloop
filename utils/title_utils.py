@@ -111,19 +111,24 @@ Transform the following real conflict into an extended, intense, suspenseful 1 M
 Requirements:
 1. "title": Viral, clickable title under 55 chars (e.g. "My Landlord Sent This At 2 AM").
 2. "hook": 1 opening sentence spoken as the premise hook (10-15 words, e.g. "When my landlord texted me at 2 AM, I never expected things to escalate this fast.").
-3. "contact_name": The contact name for the iPhone header (e.g. "Landlord Dave", "Bridezilla Sarah", "Crazy Roommate", "Boss Mike", "Ex-Fiance").
-4. "chat_messages": A list of 14 to 18 back-and-forth messages alternating between the contact and "Me".
+3. "contact_name": The contact name for the iPhone header (e.g. "Landlord Dave", "Bridezilla Sarah", "Sister Emily", "Boss Mike", "Ex-Fiancé Mark").
+4. "contact_gender": "male" or "female" (The gender of the contact person texting based on their name, role, or relationship clues).
+5. "me_gender": "male" or "female" (The gender of "Me" / the author / narrator based on story context, self-identification, or partner clues).
+   IMPORTANT: Carefully determine BOTH genders from context. Conversations can be male-to-male, female-to-female, male-to-female, or female-to-male. Do NOT assume conversations are always opposite genders!
+6. "chat_messages": A list of 14 to 18 back-and-forth messages alternating between the contact and "Me".
    - Total spoken dialogue must be 190 to 250 words so the conversation lasts 75 to 90 seconds.
    - Escalating drama arc: unreasonable opening demand -> sharp pushback -> absurd justification -> revelation of evidence/receipts -> ultimate confrontation -> mic-drop ending.
    - Each message must have: "sender" (contact name or "Me"), "text" (the text line), "is_me" (bool).
-5. "debate_question": 1 closing question asking viewers who was in the wrong and to comment/subscribe (e.g. "Whose side are you on? Drop your verdict below and subscribe for daily drama!").
-6. "voice_gender": "male" or "female".
+7. "debate_question": 1 closing question asking viewers who was in the wrong and to comment/subscribe (e.g. "Whose side are you on? Drop your verdict below and subscribe for daily drama!").
+8. "voice_gender": "male" or "female" (Should match "me_gender").
 
 Output ONLY valid JSON matching this exact schema:
 {{
   "title": "Title Here",
   "hook": "1-sentence hook premise here.",
   "contact_name": "Landlord Dave",
+  "contact_gender": "male",
+  "me_gender": "male",
   "chat_messages": [
     {{"sender": "Landlord Dave", "text": "Are you awake? I need you to vacate the apartment by tomorrow morning.", "is_me": false}},
     {{"sender": "Me", "text": "Tomorrow? My lease is signed through December and rent is fully paid.", "is_me": true}},
@@ -155,6 +160,13 @@ Raw Story Text: {raw_text[:2800]}
                     data["title"] = clean_title_for_ffmpeg(data.get("title", raw_title))
                     data["hook"] = clean_title_for_ffmpeg(data.get("hook", ""))
                     data["contact_name"] = clean_title_for_ffmpeg(data.get("contact_name", "Messages"))
+                    
+                    # Normalize genders
+                    raw_me = str(data.get("me_gender", data.get("voice_gender", "male"))).lower().strip()
+                    raw_contact = str(data.get("contact_gender", "")).lower().strip()
+                    data["me_gender"] = raw_me if raw_me in ["male", "female"] else "male"
+                    data["contact_gender"] = raw_contact if raw_contact in ["male", "female"] else ("female" if data["me_gender"] == "male" else "male")
+                    data["voice_gender"] = data["me_gender"]
                     data["story_format"] = "message_short"
                     return data
         except Exception:
@@ -183,7 +195,7 @@ Structure requirements:
 6. "red_flags": Array of 3 concise psychological patterns or boundary violations (e.g. ["Covert Expectation", "Weaponized Incompetence", "Boundary Erosion"]).
 7. "analysis": In-depth psychological and ethical breakdown spoken by the HOST (90-115 words, 35-40s).
 8. "debate_question": 1 thought-provoking debate question and subscribe CTA (e.g. "Who crossed the line here? Drop your verdict in the comments and subscribe for daily breakdowns!").
-9. "voice_gender": "male" or "female".
+9. "voice_gender": "male" or "female" (Accurately detect the narrator/OP's gender from clues like 'I (25F)', 'my husband', 'my wife', etc. Default to 'male' if ambiguous).
 
 Output ONLY valid JSON matching this schema:
 {{
@@ -219,6 +231,8 @@ Raw Text: {raw_text[:3000]}
                     data["quote_speaker"] = clean_title_for_ffmpeg(data.get("quote_speaker", "The Story"))
                     data["analysis"] = clean_title_for_ffmpeg(data.get("analysis", ""))
                     data["debate_question"] = clean_title_for_ffmpeg(data.get("debate_question", "Who was in the wrong here? Drop your thoughts in the comments and subscribe for daily breakdowns!"))
+                    raw_voice = str(data.get("voice_gender", "male")).lower().strip()
+                    data["voice_gender"] = raw_voice if raw_voice in ["male", "female"] else "male"
                     data["chat_messages"] = []
                     data["story_format"] = "breakdown_short"
                     return data
@@ -251,7 +265,7 @@ Structure requirements:
 9. "pct_b": Option B community percentage (integer 100 - pct_a).
 10. "takeaway": 1 concise community takeaway principle (under 12 words).
 11. "debate_question": 1 direct question asking the viewer to judge in the comments and subscribe (e.g. "Who was in the wrong here? Drop your verdict in the comments below, and subscribe for daily moral dilemma court!").
-12. "voice_gender": "male" or "female".
+12. "voice_gender": "male" or "female" (Accurately detect the narrator/OP's gender from clues like 'I (25F)', 'my husband', 'my wife', etc. Default to 'male' if ambiguous).
 
 Output ONLY valid JSON matching this schema:
 {{
@@ -288,6 +302,8 @@ Raw Text: {raw_text[:3500]}
                     data["story"] = clean_title_for_ffmpeg(data.get("story", ""))
                     data["analysis"] = clean_title_for_ffmpeg(data.get("analysis", ""))
                     data["debate_question"] = clean_title_for_ffmpeg(data.get("debate_question", "Who was in the wrong here? Drop your verdict in the comments below, and subscribe for daily moral dilemma court!"))
+                    raw_voice = str(data.get("voice_gender", "male")).lower().strip()
+                    data["voice_gender"] = raw_voice if raw_voice in ["male", "female"] else "male"
                     data["chat_messages"] = []
                     data["red_flags"] = []
                     data["story_format"] = "verdict_short"

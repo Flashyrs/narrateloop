@@ -190,6 +190,88 @@ def detect_gender(text):
     return "male"
 
 
+def detect_contact_gender(contact_name, fallback_gender="female"):
+    """
+    Infers gender of the message recipient/sender from name, role, or relationship.
+    """
+    if not contact_name:
+        return fallback_gender
+
+    c_lower = contact_name.lower().strip()
+
+    male_indicators = [
+        "husband", "ex-husband", "boyfriend", "ex-boyfriend", "bf", "groom", "fiancé", "fiance",
+        "dad", "father", "stepdad", "brother", "son", "uncle", "nephew", "grandpa", "grandfather",
+        "landlord", "guy", "man", "boy", "bro", "father-in-law", "brother-in-law", "son-in-law",
+        "fil", "bil", "stepfather", "stepbrother", "stepson",
+        "mark", "dave", "david", "john", "mike", "michael", "dan", "daniel", "charles", "chris",
+        "tom", "thomas", "james", "jake", "sam", "alex", "ben", "kevin", "matt", "matthew",
+        "jason", "ryan", "steve", "steven", "paul", "brian", "eric", "adam", "nick", "nicholas",
+        "josh", "joshua", "luke", "lucas", "andrew", "justin", "brandon", "tyler", "nathan",
+        "kyle", "aaron", "greg", "patrick", "sean", "shawn", "carlos", "robert", "richard",
+        "william", "joseph", "anthony", "tim", "timothy"
+    ]
+
+    female_indicators = [
+        "wife", "ex-wife", "girlfriend", "ex-girlfriend", "gf", "bride", "fiancée", "fiancee",
+        "bridezilla", "mom", "mother", "stepmom", "sister", "daughter", "aunt", "niece",
+        "grandma", "grandmother", "landlady", "woman", "girl", "lady", "mother-in-law",
+        "sister-in-law", "daughter-in-law", "mil", "sil", "stepmother", "stepsister", "stepdaughter",
+        "sarah", "sara", "emily", "karen", "jessica", "ashley", "amanda", "melissa", "rachel",
+        "emma", "olivia", "sophia", "hannah", "megan", "lauren", "stephanie", "nicole",
+        "elizabeth", "amber", "courtney", "becky", "brittany", "chloe", "claire", "victoria",
+        "rebecca", "samantha", "danielle", "chelsea", "taylor", "morgan", "vanessa", "heather",
+        "tiffany", "kayla", "kelly", "laura", "julie", "jenny", "jennifer", "mary", "patricia",
+        "linda", "barbara", "susan", "nancy", "lisa", "betty", "margaret", "sandra"
+    ]
+
+    for w in male_indicators:
+        if re.search(r"\b" + re.escape(w) + r"\b", c_lower):
+            return "male"
+
+    for w in female_indicators:
+        if re.search(r"\b" + re.escape(w) + r"\b", c_lower):
+            return "female"
+
+    return fallback_gender
+
+
+def get_dialogue_voices(me_gender, contact_gender):
+    """
+    Returns (me_edge, contact_edge, me_google, contact_google) with distinct neural voices
+    even when both participants have the same gender (M-M or F-F).
+    """
+    me_g = (me_gender or "male").lower().strip()
+    contact_g = (contact_gender or "female").lower().strip()
+
+    if me_g == "male" and contact_g == "male":
+        # Male to Male: Distinct pitch & character timbres
+        me_edge = "en-US-ChristopherNeural"
+        contact_edge = "en-US-GuyNeural"
+        me_google = "en-US-Journey-D"
+        contact_google = "en-US-Neural2-J"
+    elif me_g == "female" and contact_g == "female":
+        # Female to Female: Distinct pitch & character timbres
+        me_edge = "en-US-JennyNeural"
+        contact_edge = "en-US-AriaNeural"
+        me_google = "en-US-Journey-F"
+        contact_google = "en-US-Neural2-F"
+    elif me_g == "female" and contact_g == "male":
+        # Female to Male
+        me_edge = "en-US-JennyNeural"
+        contact_edge = "en-US-GuyNeural"
+        me_google = "en-US-Journey-F"
+        contact_google = "en-US-Neural2-J"
+    else:
+        # Male to Female
+        me_edge = "en-US-ChristopherNeural"
+        contact_edge = "en-US-JennyNeural"
+        me_google = "en-US-Neural2-J"
+        contact_google = "en-US-Journey-F"
+
+    return me_edge, contact_edge, me_google, contact_google
+
+
 def clean_text_for_tts(text):
     """Cleans up typographical punctuation, non-ascii characters, URLs, and web links for clean TTS."""
     if not text:
@@ -352,28 +434,17 @@ async def _tts_dual_role_async(story_dict, out_wav_path, timing_json_path, narra
 
     if is_conv_short:
         # Context-aware Contact & Narrator Gender Detection
-        contact_name = story_dict.get("contact_name", "Messages")
-        c_lower = contact_name.lower()
-        male_contact_indicators = ["mark", "dave", "david", "john", "mike", "dan", "charles", "husband", "landlord", "boss", "dad", "father", "brother", "fiance", "fiancé", "groom", "ex-husband"]
-        female_contact_indicators = ["sarah", "emily", "karen", "jessica", "wife", "mom", "mother", "sister", "bride", "fiancee", "fiancée", "bridezilla", "ex-wife"]
+        me_gender = story_dict.get("me_gender") or story_dict.get("voice")
+        if me_gender not in ["male", "female"]:
+            me_gender = detect_gender(story_dict.get("text", "") or story_dict.get("title", ""))
 
-        if any(w in c_lower for w in male_contact_indicators):
-            contact_gender = "male"
-            me_gender = "female"
-        elif any(w in c_lower for w in female_contact_indicators):
-            contact_gender = "female"
-            me_gender = "male"
-        else:
-            me_gender = story_dict.get("voice", "female")
-            contact_gender = "male" if me_gender == "female" else "female"
+        contact_gender = story_dict.get("contact_gender")
+        if contact_gender not in ["male", "female"]:
+            contact_name = story_dict.get("contact_name", "Messages")
+            contact_gender = detect_contact_gender(contact_name, fallback_gender="female" if me_gender == "male" else "male")
 
-        # Edge-TTS Voice mappings
-        contact_edge = "en-US-GuyNeural" if contact_gender == "male" else "en-US-JennyNeural"
-        me_edge = "en-US-JennyNeural" if me_gender == "female" else "en-US-GuyNeural"
-
-        # Google Cloud Voice mappings
-        contact_google = "en-US-Neural2-J" if contact_gender == "male" else "en-US-Journey-F"
-        me_google = "en-US-Journey-F" if me_gender == "female" else "en-US-Neural2-J"
+        # Distinct Edge-TTS & Google Voice mappings for M-M, F-F, M-F, and F-M
+        me_edge, contact_edge, me_google, contact_google = get_dialogue_voices(me_gender, contact_gender)
 
         # 1. Intro Hook (spoken once by Host Voice)
         segments_to_build = []
@@ -586,7 +657,17 @@ def generate_tts(date_str, story_name):
         narr_disp = narrator_voice
         engine_label = "Edge-TTS"
 
-    log(f"🎙️ [{engine_label}] [Story {story_name}] Host: {host_disp} | Narrator: {narr_disp} ({voice_gender}) | Subreddit: r/{subreddit}", telegram=True)
+    is_conv = (story.get("story_format") == "message_short" and bool(story.get("chat_messages")))
+    if is_conv:
+        me_g = story.get("me_gender") or story.get("voice") or detect_gender(story.get("text", "") or story.get("title", ""))
+        contact_g = story.get("contact_gender") or detect_contact_gender(story.get("contact_name", "Messages"), fallback_gender="female" if me_g == "male" else "male")
+        me_e, cont_e, me_gog, cont_gog = get_dialogue_voices(me_g, contact_g)
+        if use_google:
+            log(f"🎙️ [{engine_label}] [Story {story_name}] Host: {host_disp} | Me: {me_gog} ({me_g}) | Contact: {cont_gog} ({contact_g}) | Subreddit: r/{subreddit}", telegram=True)
+        else:
+            log(f"🎙️ [{engine_label}] [Story {story_name}] Host: {host_disp} | Me: {me_e} ({me_g}) | Contact: {cont_e} ({contact_g}) | Subreddit: r/{subreddit}", telegram=True)
+    else:
+        log(f"🎙️ [{engine_label}] [Story {story_name}] Host: {host_disp} | Narrator: {narr_disp} ({voice_gender}) | Subreddit: r/{subreddit}", telegram=True)
 
     start_t = time.time()
     duration, word_count = asyncio.run(_tts_dual_role_async(

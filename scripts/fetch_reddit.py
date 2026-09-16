@@ -470,6 +470,8 @@ def fetch_reddit_posts(target_date=None, replace_story_idx=None):
             if story_format == "message_short":
                 chat_messages = transform_data.get("chat_messages", [])
                 contact_name = transform_data.get("contact_name", "Messages")
+                me_gender = transform_data.get("me_gender", voice_gender)
+                contact_gender = transform_data.get("contact_gender", "female" if me_gender == "male" else "male")
                 # Spoken script is hook followed by each message text
                 msg_texts = [m.get("text", "") for m in chat_messages if m.get("text")]
                 full_script = f"{hook_text} " + " ".join(msg_texts)
@@ -481,8 +483,10 @@ def fetch_reddit_posts(target_date=None, replace_story_idx=None):
                     "hook": hook_text,
                     "story_format": "message_short",
                     "contact_name": contact_name,
+                    "contact_gender": contact_gender,
+                    "me_gender": me_gender,
                     "chat_messages": chat_messages,
-                    "voice": voice_gender,
+                    "voice": me_gender,
                     "part": 1,
                     "total_parts": 1,
                     "format": "short",
