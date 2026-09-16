@@ -296,6 +296,33 @@ if __name__ == "__main__":
 
     app = ApplicationBuilder().token(TOKEN).build()
 
+    def is_authorized(update: Update) -> bool:
+        """Verifies that the incoming update originates from an authorized TELEGRAM_CHAT_ID."""
+        allowed_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+        if not allowed_chat_id:
+            print("⚠️ Warning: TELEGRAM_CHAT_ID not configured in environment. Rejecting request for safety.")
+            return False
+
+        chat_id = str(update.effective_chat.id) if (update and update.effective_chat) else ""
+        user_id = str(update.effective_user.id) if (update and update.effective_user) else ""
+
+        allowed_ids = [cid.strip() for cid in allowed_chat_id.split(",") if cid.strip()]
+        if chat_id in allowed_ids or user_id in allowed_ids:
+            return True
+
+        print(f"🚫 [Security] Blocked unauthorized bot command from Chat ID: {chat_id}, User ID: {user_id}")
+        return False
+
+    def admin_only(handler_func):
+        """Decorator to enforce strict TELEGRAM_CHAT_ID authentication on Telegram commands."""
+        async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+            if not is_authorized(update):
+                await safe_reply(update, "⛔ Access Denied: You are not authorized to use this bot.")
+                return
+            return await handler_func(update, context, *args, **kwargs)
+        return wrapper
+
+    @admin_only
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         global should_stop, is_running
         should_stop = False
@@ -320,11 +347,13 @@ if __name__ == "__main__":
 
         asyncio.get_event_loop().run_in_executor(None, run)
 
+    @admin_only
     async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         global should_stop
         should_stop = True
         await safe_reply(update, "Processing will stop after current task.")
 
+    @admin_only
     async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
         global is_running
         if is_running:
@@ -356,12 +385,13 @@ if __name__ == "__main__":
 
         asyncio.get_event_loop().run_in_executor(None, run)
 
+    @admin_only
     async def task_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, _, _, active_flags = load_pipeline()
         lines = [f"{task.upper()}: {'🟢 ON' if state else '🔴 OFF'}" for task, state in active_flags.items()]
         await safe_reply(update, "⚙️ Current Task Status:\n" + "\n".join(lines))
 
-
+    @admin_only
     async def control_task(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str):
         _, _, _, active_flags = load_pipeline()
 
@@ -377,6 +407,7 @@ if __name__ == "__main__":
         active_flags[task] = True if action == "start" else False
         await safe_reply(update, f"✅ `{task.upper()}` {'enabled' if action == 'start' else 'disabled'}.")
 
+    @admin_only
     async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, _, get_upload_status, _ = load_pipeline()
 
@@ -387,8 +418,7 @@ if __name__ == "__main__":
         except Exception as e:
             await safe_reply(update, f"Error fetching status: {e}")
 
-
-
+    @admin_only
     async def log_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         today = datetime.now().strftime("%Y%m%d")
         log_path = f"logs/{today}.log"
@@ -399,6 +429,7 @@ if __name__ == "__main__":
         else:
             await safe_reply(update, "No logs found for today.")
 
+    @admin_only
     async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_reply(update,
             "/start - Start processing pipeline\n"
@@ -413,6 +444,7 @@ if __name__ == "__main__":
             "/help - Show this help message"
         )
 
+    @admin_only
     async def uptime(update: Update, context: ContextTypes.DEFAULT_TYPE):
         now = datetime.now()
         uptime_duration = now - startup_start_time

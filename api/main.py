@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
+from collections import defaultdict
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,7 +27,30 @@ def get_current_time():
         return datetime.now()
 
 # ---------------------------------------------------------------------------
-# FastAPI Application Definition
+# Input Validation & Path Traversal Defensive Controls
+# ---------------------------------------------------------------------------
+def validate_date_str(date_str: str) -> str:
+    """Strictly validates date format to YYYYMMDD to prevent path traversal."""
+    if not date_str or not re.match(r"^\d{8}$", date_str):
+        raise HTTPException(status_code=400, detail="Invalid date format. Expected YYYYMMDD.")
+    return date_str
+
+def validate_story_index(index: int) -> int:
+    """Validates story index bounds."""
+    if not (1 <= index <= 100):
+        raise HTTPException(status_code=400, detail="Invalid story index.")
+    return index
+
+def safe_path_join(base_dir: str, *paths: str) -> str:
+    """Ensures the resolved path stays strictly within the intended base directory."""
+    base = Path(base_dir).resolve()
+    target = Path(base, *paths).resolve()
+    if not str(target).startswith(str(base)):
+        raise HTTPException(status_code=400, detail="Access denied: Path traversal detected.")
+    return str(target)
+
+# ---------------------------------------------------------------------------
+# FastAPI Application Definition & Defensive Security Middleware
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="NarrateLoop : Autonomous Reddit-to-Video GenAI Pipeline",
@@ -40,11 +64,43 @@ High-throughput autonomous backend orchestrating Reddit content extraction, cont
     swagger_favicon_url="/api/logo"
 )
 
+# In-Memory Rate Limiter (120 requests/minute/IP)
+IP_REQUEST_LOG = defaultdict(list)
+RATE_LIMIT_WINDOW = 60
+MAX_REQUESTS_PER_WINDOW = 120
+
+@app.middleware("http")
+async def security_and_rate_limit_middleware(request: Request, call_next):
+    client_ip = request.client.host if request.client else "unknown"
+    now = time.time()
+
+    # Rate limiting protection
+    if client_ip != "unknown":
+        IP_REQUEST_LOG[client_ip] = [t for t in IP_REQUEST_LOG[client_ip] if now - t < RATE_LIMIT_WINDOW]
+        if len(IP_REQUEST_LOG[client_ip]) >= MAX_REQUESTS_PER_WINDOW:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests. Rate limit exceeded (120 req/min). Please try again later."}
+            )
+        IP_REQUEST_LOG[client_ip].append(now)
+
+    response = await call_next(request)
+
+    # Security Headers
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
+cors_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "*")
+allowed_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "HEAD", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -293,14 +349,16 @@ def download_video(date_str: str, index: int):
     """
     Directly streams or downloads the rendered .mp4 video artifact for manual inspection or uploads.
     """
-    video_path = os.path.join(PROJECT_ROOT, "output", date_str, f"final_{index}.mp4")
+    d_str = validate_date_str(date_str)
+    idx = validate_story_index(index)
+    video_path = safe_path_join(PROJECT_ROOT, "output", d_str, f"final_{idx}.mp4")
     if not os.path.exists(video_path):
         raise HTTPException(status_code=404, detail="Video artifact not found for requested date and index.")
     
     return FileResponse(
         path=video_path,
         media_type="video/mp4",
-        filename=f"NarrateLoop_{date_str}_Story_{index}.mp4"
+        filename=f"NarrateLoop_{d_str}_Story_{idx}.mp4"
     )
 
 @app.get("/api/videos/{date_str}/{index}/stream", tags=["Video Artifacts"])
@@ -308,7 +366,9 @@ def stream_video(date_str: str, index: int):
     """
     Streams the rendered .mp4 video artifact for browser video playback previews.
     """
-    video_path = os.path.join(PROJECT_ROOT, "output", date_str, f"final_{index}.mp4")
+    d_str = validate_date_str(date_str)
+    idx = validate_story_index(index)
+    video_path = safe_path_join(PROJECT_ROOT, "output", d_str, f"final_{idx}.mp4")
     if not os.path.exists(video_path):
         raise HTTPException(status_code=404, detail="Video artifact not found.")
     
@@ -322,11 +382,13 @@ def get_video_thumbnail(date_str: str, index: int):
     """
     Returns the exact high-definition t=1.0s video frame extracted for the video thumbnail.
     """
-    thumb_png = os.path.join(PROJECT_ROOT, "reddit_stories", date_str, f"thumb_{index}.png")
+    d_str = validate_date_str(date_str)
+    idx = validate_story_index(index)
+    thumb_png = safe_path_join(PROJECT_ROOT, "reddit_stories", d_str, f"thumb_{idx}.png")
     if os.path.exists(thumb_png):
         return FileResponse(path=thumb_png, media_type="image/png")
     
-    card_png = os.path.join(PROJECT_ROOT, "reddit_stories", date_str, f"card_{index}.png")
+    card_png = safe_path_join(PROJECT_ROOT, "reddit_stories", d_str, f"card_{idx}.png")
     if os.path.exists(card_png):
         return FileResponse(path=card_png, media_type="image/png")
     
@@ -346,23 +408,34 @@ def get_youtube_stats():
         "monetization_ready": True
     }
 
+def mask_sensitive_log_data(line: str) -> str:
+    """Masks authorization tokens, bot tokens, and sensitive keys from log outputs."""
+    # Mask bot tokens e.g. 123456789:ABCDefGHI...
+    line = re.sub(r"bot\d+:[A-Za-z0-9_-]{30,}", "bot[REDACTED_TOKEN]", line)
+    line = re.sub(r"\b\d{8,10}:[A-Za-z0-9_-]{35}\b", "[REDACTED_TELEGRAM_TOKEN]", line)
+    line = re.sub(r"(?i)(key|secret|token|password|bearer)\s*[:=]\s*['\"]?[A-Za-z0-9_\-\.]{16,}['\"]?", r"\1=[REDACTED]", line)
+    return line
+
 @app.get("/api/logs/today", tags=["Logs & Telemetry"])
 def get_today_logs(limit: int = 50):
     """
-    Returns the most recent server logs for the current daily execution cycle.
+    Returns the most recent server logs for the current daily execution cycle with sensitive token masking.
     """
+    limit = max(1, min(limit, 200))
     date_str = get_current_time().strftime("%Y%m%d")
-    log_file = os.path.join(PROJECT_ROOT, "logs", f"{date_str}.log")
+    log_file = safe_path_join(PROJECT_ROOT, "logs", f"{date_str}.log")
     if not os.path.exists(log_file):
         return {"date": date_str, "logs": ["No logs generated yet today."]}
 
     with open(log_file, "r", encoding="utf-8", errors="replace") as f:
-        lines = [line.strip() for line in f if line.strip()]
+        raw_lines = [line.strip() for line in f if line.strip()]
+
+    sanitized_lines = [mask_sensitive_log_data(l) for l in raw_lines[-limit:]]
 
     return {
         "date": date_str,
-        "total_lines": len(lines),
-        "logs": lines[-limit:]
+        "total_lines": len(raw_lines),
+        "logs": sanitized_lines
     }
 
 # ---------------------------------------------------------------------------
