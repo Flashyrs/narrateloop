@@ -118,3 +118,112 @@ def is_title_already_uploaded(target_title):
         return strip_part_suffix(target_title) in (_cached_titles or [])
     except Exception:
         return False
+
+def get_youtube_auth_url(redirect_uri="http://localhost"):
+    if not CLIENT_SECRET.exists():
+        raise FileNotFoundError(f"client_secret.json not found at {CLIENT_SECRET}")
+    flow = InstalledAppFlow.from_client_secrets_file(
+        CLIENT_SECRET,
+        scopes=[
+            "https://www.googleapis.com/auth/youtube.upload",
+            "https://www.googleapis.com/auth/youtube.readonly",
+            "https://www.googleapis.com/auth/youtube.force-ssl",
+            "https://www.googleapis.com/auth/youtube"
+        ],
+        redirect_uri=redirect_uri
+    )
+    auth_url, _ = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent"
+    )
+    return auth_url
+
+def finish_youtube_auth_flow(code_or_url, redirect_uri="http://localhost"):
+    if not CLIENT_SECRET.exists():
+        raise FileNotFoundError(f"client_secret.json not found at {CLIENT_SECRET}")
+
+    code = code_or_url.strip()
+    if "code=" in code:
+        import urllib.parse
+        parsed = urllib.parse.urlparse(code)
+        params = urllib.parse.parse_qs(parsed.query)
+        if "code" in params:
+            code = params["code"][0]
+        else:
+            m = re.search(r"code=([^&]+)", code)
+            if m:
+                code = urllib.parse.unquote(m.group(1))
+
+    flow = InstalledAppFlow.from_client_secrets_file(
+        CLIENT_SECRET,
+        scopes=[
+            "https://www.googleapis.com/auth/youtube.upload",
+            "https://www.googleapis.com/auth/youtube.readonly",
+            "https://www.googleapis.com/auth/youtube.force-ssl",
+            "https://www.googleapis.com/auth/youtube"
+        ],
+        redirect_uri=redirect_uri
+    )
+    flow.fetch_token(code=code)
+    creds = flow.credentials
+    with open(TOKEN_PATH, "wb") as token_file:
+        pickle.dump(creds, token_file)
+
+    channel_name = "Unknown Channel"
+    try:
+        service = build("youtube", "v3", credentials=creds)
+        res = service.channels().list(part="snippet", mine=True).execute()
+        items = res.get("items", [])
+        if items:
+            channel_name = items[0].get("snippet", {}).get("title", channel_name)
+    except Exception as e:
+        print(f"⚠️ Warning fetching channel details: {e}")
+
+    return channel_name
+
+def get_youtube_auth_status():
+    if not TOKEN_PATH.exists():
+        return {
+            "status": "missing",
+            "message": "❌ No token.pickle found. Use /auth_youtube to connect your channel."
+        }
+    try:
+        with open(TOKEN_PATH, "rb") as token_file:
+            creds = pickle.load(token_file)
+    except Exception as e:
+        return {
+            "status": "corrupt",
+            "message": f"❌ token.pickle corrupt: {e}. Use /auth_youtube to re-authenticate."
+        }
+
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            with open(TOKEN_PATH, "wb") as token_file:
+                pickle.dump(creds, token_file)
+        except Exception as e:
+            return {
+                "status": "expired",
+                "message": f"⚠️ Refresh token expired or revoked ({e}). Use /auth_youtube to re-authenticate."
+            }
+
+    if creds and creds.valid:
+        channel_name = "Connected Channel"
+        try:
+            service = build("youtube", "v3", credentials=creds)
+            res = service.channels().list(part="snippet", mine=True).execute()
+            items = res.get("items", [])
+            if items:
+                channel_name = items[0].get("snippet", {}).get("title", channel_name)
+        except Exception:
+            pass
+        return {
+            "status": "valid",
+            "message": f"✅ YouTube connection active.\n📺 Channel: <b>{channel_name}</b>\n🔑 Status: Ready for automated uploads."
+        }
+
+    return {
+        "status": "invalid",
+        "message": "⚠️ Token is invalid. Use /auth_youtube to connect your channel."
+    }

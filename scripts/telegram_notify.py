@@ -202,13 +202,16 @@ def clear_progress_state():
     _last_edit_chat_id = None
     _last_progress_text = None
 
-async def safe_reply(update: Update, text: str):
+async def safe_reply(update: Update, text: str, parse_mode: str = None):
     try:
-        await update.message.reply_text(text)
+        await update.message.reply_text(text, parse_mode=parse_mode)
     except TimedOut:
         log("Reply to Telegram timed out.")
     except Exception as e:
-        log(f"Reply failed: {e}")
+        try:
+            await update.message.reply_text(text)
+        except Exception as e2:
+            log(f"Reply failed: {e2}")
 
 def get_current_time():
     tz_name = os.getenv("TIMEZONE", "Asia/Kolkata")
@@ -437,12 +440,63 @@ if __name__ == "__main__":
             await safe_reply(update, "No logs found for today.")
 
     @admin_only
+    async def auth_youtube_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        try:
+            from utils.youtube_utils import get_youtube_auth_url
+            auth_url = get_youtube_auth_url(redirect_uri="http://localhost")
+            msg = (
+                "🔐 <b>YouTube Authorization</b>\n\n"
+                "To connect or re-authenticate your YouTube channel:\n\n"
+                f"1️⃣ <a href=\"{auth_url}\"><b>👉 Click Here to Authorize Google / YouTube 👈</b></a>\n\n"
+                "2️⃣ Sign in to your Google account and click <b>Continue / Allow</b>.\n\n"
+                "3️⃣ Your browser will redirect to a page starting with <code>http://localhost/?code=...</code> (it is normal if your browser says 'Cannot connect').\n\n"
+                "4️⃣ Copy that redirected URL from your browser's address bar and reply here with:\n"
+                "<code>/auth_code YOUR_REDIRECT_URL_OR_CODE</code>"
+            )
+            await safe_reply(update, msg, parse_mode="HTML")
+        except Exception as e:
+            await safe_reply(update, f"⚠️ Error generating authorization URL: {e}")
+
+    @admin_only
+    async def auth_code_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not context.args:
+            await safe_reply(update, "Usage:\n<code>/auth_code &lt;pasted_url_or_code&gt;</code>", parse_mode="HTML")
+            return
+        code_input = " ".join(context.args).strip()
+        await safe_reply(update, "⏳ Verifying authentication with Google...")
+        try:
+            from utils.youtube_utils import finish_youtube_auth_flow
+            channel_name = finish_youtube_auth_flow(code_input, redirect_uri="http://localhost")
+            await safe_reply(
+                update,
+                f"🎉 <b>YouTube Authenticated Successfully!</b>\n\n"
+                f"📺 Connected Channel: <b>{channel_name}</b>\n"
+                f"🔑 New token saved to disk.\n"
+                f"✨ Automated uploads are now active and ready.",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            await safe_reply(update, f"❌ Authentication failed: {e}\nPlease run /auth_youtube and try again.")
+
+    @admin_only
+    async def auth_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        try:
+            from utils.youtube_utils import get_youtube_auth_status
+            status_data = get_youtube_auth_status()
+            await safe_reply(update, status_data.get("message", "Unknown status"), parse_mode="HTML")
+        except Exception as e:
+            await safe_reply(update, f"Error checking auth status: {e}")
+
+    @admin_only
     async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_reply(update,
             "/start - Start processing pipeline\n"
             "/upload [n] - Upload specific story number\n"
             "/stop - Stop after current task\n"
             "/status [YYYYMMDD] - List uploadable and uploaded videos\n"
+            "/auth_youtube - Connect / re-authenticate YouTube channel\n"
+            "/auth_code [url_or_code] - Complete YouTube OAuth verification\n"
+            "/auth_status - Check active YouTube connection status\n"
             "/log - Show latest logs\n"
             "/uptime - Show how long the bot has been running\n"
             "/starttask [stage] - Enable a pipeline stage\n"
@@ -466,6 +520,9 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("stop", stop))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("uptime", uptime))
+    app.add_handler(CommandHandler("auth_youtube", auth_youtube_command))
+    app.add_handler(CommandHandler("auth_code", auth_code_command))
+    app.add_handler(CommandHandler("auth_status", auth_status_command))
     app.add_handler(CommandHandler("starttask", lambda u, c: control_task(u, c, "start")))
     app.add_handler(CommandHandler("stoptask", lambda u, c: control_task(u, c, "stop")))
 

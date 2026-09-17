@@ -439,6 +439,66 @@ def get_today_logs(limit: int = 50):
     }
 
 # ---------------------------------------------------------------------------
+# YouTube OAuth Authentication Endpoints
+# ---------------------------------------------------------------------------
+class AuthCodePayload(BaseModel):
+    code: str
+
+@app.get("/api/auth/youtube/status", tags=["YouTube OAuth"])
+def api_youtube_auth_status():
+    """Checks the active YouTube OAuth authentication status and connected channel."""
+    try:
+        from utils.youtube_utils import get_youtube_auth_status
+        return get_youtube_auth_status()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/auth/youtube/url", tags=["YouTube OAuth"])
+def api_youtube_auth_url(redirect_uri: str = "http://localhost"):
+    """Generates a fresh Google OAuth authorization URL for YouTube upload permissions."""
+    try:
+        from utils.youtube_utils import get_youtube_auth_url
+        url = get_youtube_auth_url(redirect_uri=redirect_uri)
+        return {"auth_url": url, "redirect_uri": redirect_uri}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/auth/youtube/code", tags=["YouTube OAuth"])
+def api_youtube_auth_code(payload: AuthCodePayload, redirect_uri: str = "http://localhost"):
+    """Exchanges an authorization code or redirect URL for a valid token.pickle."""
+    try:
+        from utils.youtube_utils import finish_youtube_auth_flow
+        channel_name = finish_youtube_auth_flow(payload.code, redirect_uri=redirect_uri)
+        return {
+            "success": True,
+            "channel_name": channel_name,
+            "message": f"Successfully authenticated channel: {channel_name}"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Authentication failed: {e}")
+
+@app.get("/api/auth/youtube/callback", response_class=HTMLResponse, include_in_schema=False)
+def api_youtube_auth_callback(code: Optional[str] = None, error: Optional[str] = None):
+    """Callback route if OAuth redirects directly to the server."""
+    if error:
+        return HTMLResponse(content=f"<h3>Authentication Error: {error}</h3>", status_code=400)
+    if not code:
+        return HTMLResponse(content="<h3>Missing authorization code</h3>", status_code=400)
+    try:
+        from utils.youtube_utils import finish_youtube_auth_flow
+        channel = finish_youtube_auth_flow(code, redirect_uri="http://localhost")
+        return HTMLResponse(content=f"""
+        <!DOCTYPE html><html><body style="background:#09090b;color:#f4f4f6;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
+        <div style="background:#111114;border:1px solid #222227;padding:32px;border-radius:12px;text-align:center;max-width:400px;">
+            <h2 style="color:#10b981;margin-bottom:12px;">✅ Connected Successfully</h2>
+            <p style="color:#94949e;margin-bottom:16px;">YouTube Channel: <b style="color:#fff;">{channel}</b> is now authenticated for NarrateLoop automated uploads.</p>
+            <p style="color:#60606b;font-size:13px;">You can safely close this window.</p>
+        </div></body></html>
+        """)
+    except Exception as e:
+        return HTMLResponse(content=f"<h3>Authentication verification error: {e}</h3>", status_code=500)
+
+# ---------------------------------------------------------------------------
 # Logo & Favicon Endpoints
 # ---------------------------------------------------------------------------
 FAVICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">

@@ -54,11 +54,16 @@ def admin_only(handler_func):
     return wrapper
 
 
-async def safe_reply(update: Update, text: str):
+async def safe_reply(update: Update, text: str, parse_mode: str = None):
     try:
-        await update.message.reply_text(text)
+        await update.message.reply_text(text, parse_mode=parse_mode)
     except TimedOut:
         print(f"[Telegram] Timed out while sending: {text}")
+    except Exception as e:
+        try:
+            await update.message.reply_text(text)
+        except Exception as e2:
+            print(f"[Telegram] Failed sending reply: {e2}")
 
 
 @admin_only
@@ -84,6 +89,57 @@ async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_reply(update, result)
 
 
+@admin_only
+async def auth_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        from utils.youtube_utils import get_youtube_auth_url
+        auth_url = get_youtube_auth_url(redirect_uri="http://localhost")
+        msg = (
+            "🔐 <b>YouTube Authorization</b>\n\n"
+            "To connect or re-authenticate your YouTube channel:\n\n"
+            f"1️⃣ <a href=\"{auth_url}\"><b>👉 Click Here to Authorize Google / YouTube 👈</b></a>\n\n"
+            "2️⃣ Sign in to your Google account and click <b>Continue / Allow</b>.\n\n"
+            "3️⃣ Your browser will redirect to a page starting with <code>http://localhost/?code=...</code> (it is normal if your browser says 'Cannot connect').\n\n"
+            "4️⃣ Copy that redirected URL from your browser's address bar and reply here with:\n"
+            "<code>/auth_code YOUR_REDIRECT_URL_OR_CODE</code>"
+        )
+        await safe_reply(update, msg, parse_mode="HTML")
+    except Exception as e:
+        await safe_reply(update, f"⚠️ Error generating authorization URL: {e}")
+
+
+@admin_only
+async def auth_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await safe_reply(update, "Usage:\n<code>/auth_code &lt;pasted_url_or_code&gt;</code>", parse_mode="HTML")
+        return
+    code_input = " ".join(context.args).strip()
+    await safe_reply(update, "⏳ Verifying authentication with Google...")
+    try:
+        from utils.youtube_utils import finish_youtube_auth_flow
+        channel_name = finish_youtube_auth_flow(code_input, redirect_uri="http://localhost")
+        await safe_reply(
+            update,
+            f"🎉 <b>YouTube Authenticated Successfully!</b>\n\n"
+            f"📺 Connected Channel: <b>{channel_name}</b>\n"
+            f"🔑 New token saved to disk.\n"
+            f"✨ Automated uploads are now ready.",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        await safe_reply(update, f"❌ Authentication failed: {e}\nPlease run /auth_youtube and try again.")
+
+
+@admin_only
+async def auth_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        from utils.youtube_utils import get_youtube_auth_status
+        status_data = get_youtube_auth_status()
+        await safe_reply(update, status_data.get("message", "Unknown status"), parse_mode="HTML")
+    except Exception as e:
+        await safe_reply(update, f"Error checking auth status: {e}")
+
+
 if __name__ == "__main__":
     if not TOKEN:
         print("Missing TELEGRAM_BOT_TOKEN in environment.")
@@ -93,6 +149,9 @@ if __name__ == "__main__":
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("upload", upload))
+    app.add_handler(CommandHandler("auth_youtube", auth_youtube))
+    app.add_handler(CommandHandler("auth_code", auth_code))
+    app.add_handler(CommandHandler("auth_status", auth_status))
 
     print("Telegram bot running (Strict Admin Authentication Enabled)...")
     app.run_polling()
