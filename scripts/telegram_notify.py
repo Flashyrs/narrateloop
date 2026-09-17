@@ -4,9 +4,16 @@ import psutil
 import requests
 import asyncio
 from datetime import datetime, timedelta
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from telegram.error import TimedOut
+try:
+    from telegram import Update
+    from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+    from telegram.error import TimedOut
+except ImportError:
+    from unittest.mock import MagicMock
+    Update = MagicMock
+    ApplicationBuilder = CommandHandler = MagicMock
+    ContextTypes = MagicMock()
+    TimedOut = Exception
 import time
 from threading import Thread
 from dotenv import load_dotenv

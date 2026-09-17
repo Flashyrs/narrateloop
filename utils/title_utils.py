@@ -48,7 +48,7 @@ def generate_title_with_gemini(text, fallback_title):
     for model_name in models_to_try:
         try:
             m = genai.GenerativeModel(model_name=f"models/{model_name}" if not model_name.startswith("models/") else model_name)
-            response = m.generate_content(prompt)
+            response = m.generate_content(prompt, request_options={"timeout": 60})
             if response and response.candidates and response.candidates[0].content.parts:
                 gemini_title = response.candidates[0].content.parts[0].text.strip()
                 cleaned = clean_title_for_ffmpeg(gemini_title)
@@ -84,7 +84,7 @@ def enhance_story_hook_with_gemini(text, subreddit="Reddit"):
     for model_name in models_to_try:
         try:
             m = genai.GenerativeModel(model_name=f"models/{model_name}" if not model_name.startswith("models/") else model_name)
-            response = m.generate_content(prompt)
+            response = m.generate_content(prompt, request_options={"timeout": 60})
             if response and response.candidates and response.candidates[0].content.parts:
                 enhanced_text = response.candidates[0].content.parts[0].text.strip()
                 if enhanced_text and len(enhanced_text) >= len(text) * 0.7:
@@ -150,7 +150,7 @@ Raw Story Text: {raw_text[:2800]}
     for model_name in models_to_try:
         try:
             m = genai.GenerativeModel(model_name=f"models/{model_name}" if not model_name.startswith("models/") else model_name)
-            response = m.generate_content(prompt)
+            response = m.generate_content(prompt, request_options={"timeout": 60})
             if response and response.candidates and response.candidates[0].content.parts:
                 raw_out = response.candidates[0].content.parts[0].text.strip()
                 json_str = re.sub(r"^```json\s*", "", raw_out, flags=re.IGNORECASE)
@@ -217,7 +217,7 @@ Raw Text: {raw_text[:3000]}
     for model_name in models_to_try:
         try:
             m = genai.GenerativeModel(model_name=f"models/{model_name}" if not model_name.startswith("models/") else model_name)
-            response = m.generate_content(prompt)
+            response = m.generate_content(prompt, request_options={"timeout": 60})
             if response and response.candidates and response.candidates[0].content.parts:
                 raw_out = response.candidates[0].content.parts[0].text.strip()
                 json_str = re.sub(r"^```json\s*", "", raw_out, flags=re.IGNORECASE)
@@ -290,7 +290,7 @@ Raw Text: {raw_text[:3500]}
     for model_name in models_to_try:
         try:
             m = genai.GenerativeModel(model_name=f"models/{model_name}" if not model_name.startswith("models/") else model_name)
-            response = m.generate_content(prompt)
+            response = m.generate_content(prompt, request_options={"timeout": 60})
             if response and response.candidates and response.candidates[0].content.parts:
                 raw_out = response.candidates[0].content.parts[0].text.strip()
                 json_str = re.sub(r"^```json\s*", "", raw_out, flags=re.IGNORECASE)

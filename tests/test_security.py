@@ -8,6 +8,13 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+if "telegram" not in sys.modules:
+    try:
+        import telegram
+    except ImportError:
+        sys.modules["telegram"] = MagicMock()
+        sys.modules["telegram.ext"] = MagicMock()
+
 from api.main import validate_date_str, validate_story_index, safe_path_join, mask_sensitive_log_data
 from telegram_bot import is_authorized as bot_is_authorized
 

@@ -6,6 +6,15 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+from unittest.mock import MagicMock
+
+if "telegram" not in sys.modules:
+    try:
+        import telegram
+    except ImportError:
+        sys.modules["telegram"] = MagicMock()
+        sys.modules["telegram.ext"] = MagicMock()
+
 from scripts.generate_tts import detect_gender, detect_contact_gender, get_dialogue_voices
 
 class TestGenderIdentification(unittest.TestCase):

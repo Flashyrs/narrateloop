@@ -30,7 +30,7 @@ def generate_title_and_description(story):
     )
     return title, description[:4900], tags
 
-def authenticate_youtube(headless=False, port=8080):
+def authenticate_youtube(headless=False, port=8080, allow_interactive=False):
     SCOPES = [
         "https://www.googleapis.com/auth/youtube.force-ssl",
         "https://www.googleapis.com/auth/youtube.upload",
@@ -41,13 +41,14 @@ def authenticate_youtube(headless=False, port=8080):
     token_path = Path(os.getenv("YOUTUBE_TOKEN_PATH", project_root / "token.pickle")).resolve()
     client_secret = Path(os.getenv("YOUTUBE_CLIENT_SECRET", project_root / "client_secret.json")).resolve()
 
-    if not os.path.exists(client_secret):
-        raise FileNotFoundError(f"client_secret.json not found at {client_secret}")
-
     # Load credentials if token exists
     if os.path.exists(token_path):
-        with open(token_path, "rb") as token:
-            creds = pickle.load(token)
+        try:
+            with open(token_path, "rb") as token:
+                creds = pickle.load(token)
+        except Exception as e:
+            print(f"[WARNING] Failed reading token file: {e}")
+            creds = None
 
     # Refresh token if expired
     if creds and creds.expired and creds.refresh_token:
@@ -60,8 +61,17 @@ def authenticate_youtube(headless=False, port=8080):
             print(f"[ERROR] Token refresh failed: {e}")
             creds = None
 
-    # If no creds or refresh failed, authenticate again
+    # If no valid creds
     if not creds or not creds.valid:
+        if not allow_interactive:
+            raise RuntimeError(
+                "YouTube token is missing or expired. "
+                "Run 'python scripts/upload_to_youtube.py --auth' interactively to authenticate."
+            )
+
+        if not os.path.exists(client_secret):
+            raise FileNotFoundError(f"client_secret.json not found at {client_secret}")
+
         flow = InstalledAppFlow.from_client_secrets_file(client_secret, SCOPES)
         print("🔑 Initiating OAuth authentication...")
         if headless:
@@ -74,7 +84,7 @@ def authenticate_youtube(headless=False, port=8080):
     return build("youtube", "v3", credentials=creds)
 
 def upload_video(file_path, title, description, tags=None, thumbnail_path=None):
-    youtube = authenticate_youtube()
+    youtube = authenticate_youtube(allow_interactive=False)
 
     request_body = {
         "snippet": {
@@ -116,4 +126,16 @@ def upload_video(file_path, title, description, tags=None, thumbnail_path=None):
     video_url = f"https://youtube.com/watch?v={response['id']}"
     print(f"✅ Uploaded: {video_url}")
     return video_url
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="YouTube Upload and Auth Utility")
+    parser.add_argument("--auth", action="store_true", help="Run interactive OAuth authentication")
+    parser.add_argument("--headless", action="store_true", help="Run OAuth in headless mode")
+    parser.add_argument("--port", type=int, default=8080, help="Port for OAuth redirect server")
+    args = parser.parse_args()
+
+    if args.auth:
+        authenticate_youtube(headless=args.headless, port=args.port, allow_interactive=True)
+        print("🎉 Authentication successful!")
 

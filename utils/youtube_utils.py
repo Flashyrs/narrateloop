@@ -21,13 +21,17 @@ _cached_titles = None
 def strip_part_suffix(title):
     return re.sub(r"\s*\[Part \d+ of \d+\]$", "", title, flags=re.IGNORECASE).strip().lower()
 
-def get_authenticated_service():
+def get_authenticated_service(allow_interactive=False):
     creds = None
 
     # Load existing token
     if TOKEN_PATH.exists():
-        with open(TOKEN_PATH, "rb") as token_file:
-            creds = pickle.load(token_file)
+        try:
+            with open(TOKEN_PATH, "rb") as token_file:
+                creds = pickle.load(token_file)
+        except Exception as e:
+            print(f"⚠️ Error loading token from {TOKEN_PATH}: {e}")
+            creds = None
 
     # Refresh token if expired
     if creds and creds.expired and creds.refresh_token:
@@ -36,17 +40,20 @@ def get_authenticated_service():
             with open(TOKEN_PATH, "wb") as token_file:
                 pickle.dump(creds, token_file)
             print("🔁 Token refreshed successfully.")
-        except RefreshError as e:
-            print(f"⚠️ Refresh token failed: {e}. Reauthenticating...")
+        except Exception as e:
+            print(f"⚠️ Refresh token failed: {e}. Token expired/revoked.")
             creds = None  # Force reauth
 
-    # If no valid creds, check if non-interactive mode
+    # If no valid creds, check if interactive mode is explicitly allowed
     if not creds or not creds.valid:
+        if not allow_interactive:
+            # In automated background pipelines, NEVER block on local server!
+            return None
+
         if not CLIENT_SECRET.exists():
             return None
-        # In non-interactive or background environments, do not block on browser prompt
         try:
-            print("🔐 Attempting OAuth flow...")
+            print("🔐 Attempting interactive OAuth flow...")
             flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET, SCOPES)
             creds = flow.run_local_server(port=0, open_browser=False)
             with open(TOKEN_PATH, "wb") as token_file:
@@ -57,7 +64,11 @@ def get_authenticated_service():
             return None
 
     if creds and creds.valid:
-        return build("youtube", "v3", credentials=creds)
+        try:
+            return build("youtube", "v3", credentials=creds)
+        except Exception as e:
+            print(f"⚠️ Failed building YouTube client: {e}")
+            return None
     return None
 
 def get_recent_video_titles(max_results=200):
