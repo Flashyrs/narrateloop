@@ -140,6 +140,23 @@ async def auth_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_reply(update, f"Error checking auth status: {e}")
 
 
+@admin_only
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = (
+        "🤖 <b>NarrateLoop Control Center</b>\n\n"
+        "<b>🎬 Pipeline Controls:</b>\n"
+        "• <code>/start</code> — Trigger full pipeline (Reddit fetch, TTS generation, video rendering)\n"
+        "• <code>/upload</code> — Upload next pending video to YouTube\n\n"
+        "<b>🔐 YouTube Authentication:</b>\n"
+        "• <code>/auth_youtube</code> — Connect or re-authenticate your YouTube channel via 1-click Google OAuth link\n"
+        "• <code>/auth_code [url_or_code]</code> — Complete OAuth verification by submitting the redirect URL or code\n"
+        "• <code>/auth_status</code> — Check active YouTube connection status and connected channel name\n\n"
+        "<b>ℹ️ General:</b>\n"
+        "• <code>/help</code> — Show this comprehensive commands guide"
+    )
+    await safe_reply(update, msg, parse_mode="HTML")
+
+
 if __name__ == "__main__":
     if not TOKEN:
         print("Missing TELEGRAM_BOT_TOKEN in environment.")
@@ -152,6 +169,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("auth_youtube", auth_youtube))
     app.add_handler(CommandHandler("auth_code", auth_code))
     app.add_handler(CommandHandler("auth_status", auth_status))
+    app.add_handler(CommandHandler("help", help_command))
 
     print("Telegram bot running (Strict Admin Authentication Enabled)...")
     app.run_polling()

@@ -277,9 +277,28 @@ def schedule_uploads():
                             global is_running
                             is_running = True
                             try:
+                                from utils.youtube_utils import get_youtube_auth_status
+                                auth_check = get_youtube_auth_status()
+                                if auth_check.get("status") in ["missing", "expired", "corrupt", "invalid"]:
+                                    send_telegram_log(
+                                        f"🚨 <b>Scheduled Upload Alert (Time: {now}):</b>\n\n"
+                                        f"⚠️ Cannot upload story_{sn}.json because YouTube authentication is expired or missing.\n\n"
+                                        f"👉 <b>Please re-authenticate now:</b>\n"
+                                        f"Send <code>/auth_youtube</code> in this chat."
+                                    )
+                                    return
+
                                 run_pipeline_upload_specific(sn)
                             except Exception as e:
-                                log(f"[AutoUpload] Error uploading story {sn}: {e}")
+                                err_str = str(e)
+                                log(f"[AutoUpload] Error uploading story {sn}: {err_str}")
+                                if "YouTube token" in err_str or "re-authenticate" in err_str or "RefreshError" in err_str:
+                                    send_telegram_log(
+                                        f"🚨 <b>YouTube Upload Failed: Authentication Expired</b>\n\n"
+                                        f"Automated upload for story_{sn}.json was paused.\n\n"
+                                        f"👉 <b>To re-authenticate now:</b>\n"
+                                        f"Send <code>/auth_youtube</code> in this chat."
+                                    )
                             finally:
                                 is_running = False
                                 clear_progress_state()
@@ -387,7 +406,14 @@ if __name__ == "__main__":
             try:
                 run_pipeline_upload_specific(story_num)
             except Exception as e:
-                log(f"Upload command error: {e}")
+                err_str = str(e)
+                log(f"Upload command error: {err_str}")
+                if "YouTube token" in err_str or "re-authenticate" in err_str or "RefreshError" in err_str:
+                    send_telegram_log(
+                        "🚨 <b>YouTube Upload Failed: Authentication Expired</b>\n\n"
+                        "Please re-authenticate your channel by running:\n"
+                        "<code>/auth_youtube</code>"
+                    )
             finally:
                 global is_running
                 is_running = False
@@ -489,21 +515,28 @@ if __name__ == "__main__":
 
     @admin_only
     async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await safe_reply(update,
-            "/start - Start processing pipeline\n"
-            "/upload [n] - Upload specific story number\n"
-            "/stop - Stop after current task\n"
-            "/status [YYYYMMDD] - List uploadable and uploaded videos\n"
-            "/auth_youtube - Connect / re-authenticate YouTube channel\n"
-            "/auth_code [url_or_code] - Complete YouTube OAuth verification\n"
-            "/auth_status - Check active YouTube connection status\n"
-            "/log - Show latest logs\n"
-            "/uptime - Show how long the bot has been running\n"
-            "/starttask [stage] - Enable a pipeline stage\n"
-            "/stoptask [stage] - Disable a pipeline stage\n"
-            "/taskstatus - Show enabled/disabled stages\n"
-            "/help - Show this help message"
+        msg = (
+            "🤖 <b>NarrateLoop Control Center</b>\n\n"
+            "<b>🎬 Pipeline Controls:</b>\n"
+            "• <code>/start</code> — Trigger full pipeline execution for today\n"
+            "• <code>/upload [n]</code> — Upload specific story video (e.g. <code>/upload 1</code>, <code>/upload 2</code>, <code>/upload 3</code>)\n"
+            "• <code>/stop</code> — Gracefully stop pipeline after current task\n\n"
+            "<b>🔐 YouTube Authentication:</b>\n"
+            "• <code>/auth_youtube</code> — Connect or re-authenticate your YouTube channel via 1-click Google OAuth link\n"
+            "• <code>/auth_code [url_or_code]</code> — Complete OAuth verification by submitting the redirect URL or code\n"
+            "• <code>/auth_status</code> — Check active YouTube connection status and connected channel name\n\n"
+            "<b>📊 Status & Monitoring:</b>\n"
+            "• <code>/status [YYYYMMDD]</code> — View rendered and uploaded video statuses for today or specific date\n"
+            "• <code>/taskstatus</code> — View active/inactive status of individual pipeline stages\n"
+            "• <code>/log</code> — View latest live pipeline execution logs\n"
+            "• <code>/uptime</code> — Show system uptime and service duration\n\n"
+            "<b>⚙️ Stage Flags Configuration:</b>\n"
+            "• <code>/starttask [stage]</code> — Enable stage (<code>tts</code>, <code>subs</code>, <code>render</code>, <code>upload</code>)\n"
+            "• <code>/stoptask [stage]</code> — Disable stage (<code>tts</code>, <code>subs</code>, <code>render</code>, <code>upload</code>)\n\n"
+            "<b>ℹ️ General:</b>\n"
+            "• <code>/help</code> — Show this comprehensive commands guide"
         )
+        await safe_reply(update, msg, parse_mode="HTML")
 
     @admin_only
     async def uptime(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -530,6 +563,19 @@ if __name__ == "__main__":
         try:
             send_startup_status("🚀 Initializing, please wait...", initial=True)
             log("Starting processing in background...", telegram=True)
+
+            # Proactively check YouTube authentication health
+            try:
+                from utils.youtube_utils import get_youtube_auth_status
+                auth_status_info = get_youtube_auth_status()
+                if auth_status_info.get("status") in ["missing", "expired", "corrupt", "invalid"]:
+                    send_telegram_log(
+                        "⚠️ <b>YouTube Notice:</b> YouTube token is expired or not configured.\n"
+                        "Send <code>/auth_youtube</code> to connect your channel for automated uploads."
+                    )
+            except Exception as ae:
+                log(f"Warning during startup auth check: {ae}")
+
             run_pipeline, _, _, _ = load_pipeline()
             start = time.time()
             Thread(target=run_pipeline, kwargs={"upload": False}, daemon=True).start()

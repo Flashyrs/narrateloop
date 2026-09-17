@@ -437,7 +437,16 @@ def run_pipeline_upload_specific(index):
         thumbnail_path_jpg if os.path.exists(thumbnail_path_jpg) else None
     )
 
-    video_url = upload_video(output_path, title, description, tags, thumbnail_path=thumbnail_path)
+    try:
+        video_url = upload_video(output_path, title, description, tags, thumbnail_path=thumbnail_path)
+    except Exception as ue:
+        err_str = str(ue)
+        if "YouTube token" in err_str or "re-authenticate" in err_str or "RefreshError" in err_str or "invalid_grant" in err_str:
+            log(f"🚨 [YouTube Auth Alert] Upload failed: {err_str}", date_str, telegram=True)
+            log("👉 Please re-authenticate YouTube by sending /auth_youtube in Telegram.", date_str, telegram=True)
+        else:
+            log(f"❌ [Upload Error] final_{index}.mp4 failed: {ue}", date_str, telegram=True)
+        raise ue
 
     # ✅ Log and write upload data
     with open(uploaded_log, "a", encoding="utf-8") as f:
