@@ -1,8 +1,8 @@
 import os
 import json
 import subprocess
-from datetime import datetime
-from scripts.upload_to_youtube import upload_video, generate_title_and_description
+from datetime import datetime, timedelta
+from scripts.upload_to_youtube import upload_video, generate_title_and_description, parse_schedule_time
 
 def get_current_time():
     tz_name = os.getenv("TIMEZONE", "Asia/Kolkata")
@@ -55,9 +55,36 @@ def upload_pending_video():
 
         title, description, tags = generate_title_and_description(story)
         thumb_path = os.path.join(reddit_dir, f"thumb_{i}.png")
-        url = upload_video(video_path, title, description, tags=tags, thumbnail_path=thumb_path if os.path.exists(thumb_path) else None)
+
+        publish_at = None
+        target_display = None
+        if os.getenv("SCHEDULE_UPLOADS", "true").lower() in ("true", "1", "yes"):
+            days_ahead = int(os.getenv("SCHEDULE_DAYS_AHEAD", "1"))
+            # Default slot mapping: 2 -> 10:00, 3 -> 16:00, 1 -> 21:00
+            slot_map = {2: "10:00", 3: "16:00", 1: "21:00"}
+            slot_time = slot_map.get(i, "18:00")
+            target_dt = get_current_time() + timedelta(days=days_ahead)
+            target_str = f"{target_dt.strftime('%Y-%m-%d')} {slot_time}"
+            publish_at = parse_schedule_time(target_str)
+            target_display = f"{target_str} ({os.getenv('TIMEZONE', 'Asia/Kolkata')})"
+
+        url = upload_video(
+            video_path,
+            title,
+            description,
+            tags=tags,
+            thumbnail_path=thumb_path if os.path.exists(thumb_path) else None,
+            publish_at=publish_at
+        )
+        entry = f"{video_file} | {title} | {url}"
+        if target_display:
+            entry += f" | Scheduled: {target_display}"
         with open(uploaded_log, "a") as f:
-            f.write(f"{video_file} | {title} | {url}\n")
-        return f"Uploaded {video_file}\n{url}"
+            f.write(entry + "\n")
+        
+        status_msg = f"Uploaded {video_file}\n{url}"
+        if target_display:
+            status_msg += f"\nScheduled for: {target_display}"
+        return status_msg
 
     return "No pending videos to upload."

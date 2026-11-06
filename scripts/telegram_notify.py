@@ -251,13 +251,15 @@ def schedule_uploads():
             daily_trigger_time = os.getenv("DAILY_RUN_TIME", "02:00")
             if now == daily_trigger_time and today_str != last_daily_date:
                 last_daily_date = today_str
-                send_telegram_log(f"🌙 Starting automated daily pipeline for {today_str}...")
+                advance_days = int(os.getenv("SCHEDULE_DAYS_AHEAD", "1")) if os.getenv("SCHEDULE_UPLOADS", "true").lower() in ("true", "1", "yes") else 0
+                target_date_str = (get_current_time() + timedelta(days=advance_days)).strftime("%Y%m%d")
+                send_telegram_log(f"🌙 Starting automated daily pipeline for target date {target_date_str}...")
 
                 def run_daily():
                     global is_running
                     is_running = True
                     try:
-                        run_pipeline(upload=False)
+                        run_pipeline(upload=True, target_date=target_date_str, upload_all=True)
                     except Exception as e:
                         log(f"[DailyPipeline] Error in daily pipeline run: {e}")
                     finally:
@@ -359,13 +361,28 @@ if __name__ == "__main__":
             await safe_reply(update, "Already running.")
             return
 
+        # Determine target date
+        target_date_str = None
+        if context.args:
+            arg = context.args[0].lower().strip()
+            if arg in ("today", "now"):
+                target_date_str = get_current_time().strftime("%Y%m%d")
+            elif arg == "tomorrow":
+                target_date_str = (get_current_time() + timedelta(days=1)).strftime("%Y%m%d")
+            elif len(arg) == 8 and arg.isdigit():
+                target_date_str = arg
+
+        if not target_date_str:
+            advance_days = int(os.getenv("SCHEDULE_DAYS_AHEAD", "1")) if os.getenv("SCHEDULE_UPLOADS", "true").lower() in ("true", "1", "yes") else 0
+            target_date_str = (get_current_time() + timedelta(days=advance_days)).strftime("%Y%m%d")
+
         is_running = True
-        await safe_reply(update, "Starting processing...")
+        await safe_reply(update, f"🚀 Starting pipeline for target date {target_date_str} (render + schedule upload)...")
         run_pipeline, _, _, _ = load_pipeline()
 
         def run():
             try:
-                run_pipeline(upload=False)
+                run_pipeline(upload=True, target_date=target_date_str, upload_all=True)
             except Exception as e:
                 log(f"Pipeline error during start: {e}")
             finally:
@@ -391,20 +408,39 @@ if __name__ == "__main__":
 
         try:
             if not context.args:
-                await safe_reply(update, "Usage: /upload 1 or /upload 2 or /upload 3")
+                await safe_reply(update, "Usage:\n/upload 1 (auto-schedules for tomorrow)\n/upload 1 now (immediate public)\n/upload 1 tomorrow 18:00")
                 return
             story_num = int(context.args[0])
+            custom_schedule = None
+            if len(context.args) > 1:
+                sched_arg = " ".join(context.args[1:]).strip()
+                if sched_arg.lower() in ("now", "public", "immediate"):
+                    custom_schedule = False
+                else:
+                    custom_schedule = sched_arg
         except Exception as e:
             await safe_reply(update, f"Error parsing command: {e}")
             return
 
         is_running = True
-        await safe_reply(update, f"Uploading video for story_{story_num}.json...")
+        msg = f"Processing upload for story_{story_num}.json..."
+        if custom_schedule is False:
+            msg += " (Immediate Public)"
+        elif custom_schedule:
+            msg += f" (Scheduled: {custom_schedule})"
+        else:
+            msg += " (Advance Scheduled for Tomorrow)"
+        await safe_reply(update, msg)
         _, run_pipeline_upload_specific, _, _ = load_pipeline()
 
         def run():
             try:
-                run_pipeline_upload_specific(story_num)
+                if custom_schedule is False:
+                    run_pipeline_upload_specific(story_num, publish_at=False)
+                elif custom_schedule:
+                    run_pipeline_upload_specific(story_num, publish_at=custom_schedule)
+                else:
+                    run_pipeline_upload_specific(story_num)
             except Exception as e:
                 err_str = str(e)
                 log(f"Upload command error: {err_str}")

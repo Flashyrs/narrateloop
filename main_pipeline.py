@@ -18,7 +18,7 @@ from scripts.fetch_reddit import fetch_reddit_posts
 from scripts.generate_tts import generate_tts
 from scripts.generate_subs import generate_subs
 from scripts.render_video import render_video
-from scripts.upload_to_youtube import upload_video, generate_title_and_description
+from scripts.upload_to_youtube import upload_video, generate_title_and_description, parse_schedule_time
 from scripts.refresh_pending_queue import refresh_pending_queue
 from utils.db_utils import get_or_create_job, update_job_stage, get_job, get_pipeline_summary, check_api_quota, increment_api_quota
 from utils.metrics_utils import ResourceTracker
@@ -71,6 +71,45 @@ def get_current_time():
         return datetime.now(ZoneInfo(tz_name))
     except Exception:
         return datetime.now()
+
+
+def get_target_publish_time(story_index, target_date_str=None, days_ahead=1):
+    """
+    Computes the scheduled publish time for a given story index.
+    Maps story index to default slots: {2: '10:00', 3: '16:00', 1: '21:00'}.
+    If target_date_str is given (e.g. '20261107'): schedules on that exact date.
+    Returns (utc_iso_string, local_display_string).
+    """
+    from datetime import timedelta
+    custom_times = os.getenv("UPLOAD_TIMES")
+    if custom_times:
+        times = [t.strip() for t in custom_times.split(",") if t.strip()]
+        if len(times) == 3:
+            slot_map = {2: times[0], 3: times[1], 1: times[2]}
+            slot_time = slot_map.get(story_index, times[0])
+        else:
+            slot_time = times[0] if times else "18:00"
+    else:
+        # Default slot schedule: 2 -> 10:00, 3 -> 16:00, 1 -> 21:00
+        slot_map = {2: "10:00", 3: "16:00", 1: "21:00"}
+        slot_time = slot_map.get(story_index, "18:00")
+
+    if target_date_str and len(str(target_date_str)) == 8:
+        # Parse YYYYMMDD string directly
+        s = str(target_date_str)
+        curr_today = get_current_time().strftime("%Y%m%d")
+        if s == curr_today:
+            # If targeting today's date, publish immediately (public)
+            return None, None
+        target_str = f"{s[:4]}-{s[4:6]}-{s[6:8]} {slot_time}"
+    else:
+        curr = get_current_time()
+        target_dt = curr + timedelta(days=days_ahead)
+        target_str = f"{target_dt.strftime('%Y-%m-%d')} {slot_time}"
+
+    local_display = f"{target_str} ({os.getenv('TIMEZONE', 'Asia/Kolkata')})"
+    utc_iso = parse_schedule_time(target_str)
+    return utc_iso, local_display
 
 
 def log(message, date_str=None, telegram=False, tts_progress=False):
@@ -222,21 +261,30 @@ def get_next_valid_gameplay():
             return clip, path
     raise Exception("No valid gameplay clip found in queue.")
 
-def run_pipeline(upload=False):
+def run_pipeline(upload=False, target_date=None, upload_all=True):
     if not acquire_pipeline_lock():
         log("[Pipeline] Another pipeline instance is already running. Skipping duplicate trigger.")
         return
 
     try:
         start_time = time.time()
-        date_str = get_current_time().strftime("%Y%m%d")
+        from datetime import timedelta
+        if target_date:
+            date_str = str(target_date).replace("-", "")
+        else:
+            # If advance scheduling is enabled, default target date is tomorrow (+1 day)
+            advance_days = int(os.getenv("SCHEDULE_DAYS_AHEAD", "1")) if os.getenv("SCHEDULE_UPLOADS", "true").lower() in ("true", "1", "yes") else 0
+            target_dt = get_current_time() + timedelta(days=advance_days)
+            date_str = target_dt.strftime("%Y%m%d")
+
+        log(f"🚀 Pipeline targeting date folder: {date_str}", date_str, telegram=True)
         cleanup_old_data()
         refresh_pending_queue()
 
         reddit_path = os.path.join(REDDIT_DIR, date_str)
         if not os.path.exists(reddit_path) or len(os.listdir(reddit_path)) < 3:
-            log("Fetching Reddit stories...", date_str, telegram=True)
-            fetch_reddit_posts()
+            log(f"Fetching Reddit stories for {date_str}...", date_str, telegram=True)
+            fetch_reddit_posts(target_date=date_str)
 
         story_files = get_story_files(reddit_path)
         upload_done = False
@@ -328,8 +376,8 @@ def run_pipeline(upload=False):
                 update_job_stage(date_str, story_index, "FAILED", error_message=f"Validation failed: {reason}")
                 continue
 
-            # 5. Immediate Upload (if upload flag enabled)
-            if upload and not upload_done and task_flags.get("upload", True):
+            # 5. Upload Stage (Immediate or Scheduled)
+            if upload and task_flags.get("upload", True):
                 already_uploaded = False
                 if os.path.exists(uploaded_log):
                     with open(uploaded_log, "r") as f:
@@ -343,15 +391,27 @@ def run_pipeline(upload=False):
                     thumbnail_path = thumbnail_path_png if os.path.exists(thumbnail_path_png) else (
                         thumbnail_path_jpg if os.path.exists(thumbnail_path_jpg) else None
                     )
-                    url = upload_video(output_path, title, description, tags, thumbnail_path=thumbnail_path)
+                    publish_at = None
+                    target_display = None
+                    if os.getenv("SCHEDULE_UPLOADS", "true").lower() in ("true", "1", "yes"):
+                        publish_at, target_display = get_target_publish_time(story_index, target_date_str=date_str)
+
+                    url = upload_video(output_path, title, description, tags, thumbnail_path=thumbnail_path, publish_at=publish_at)
                     increment_api_quota("upload", date_str, success=True)
 
+                    entry = f"final_{story_index}.mp4 | {title} | {url}"
+                    if target_display:
+                        entry += f" | Scheduled: {target_display}"
                     with open(uploaded_log, "a", encoding="utf-8") as f:
-                        f.write(f"final_{story_index}.mp4 | {title} | {url}\n")
+                        f.write(entry + "\n")
                     update_job_stage(date_str, story_index, "UPLOADED", upload_url=url)
-                    log(f"[{filename}] Uploaded: {url}", date_str, telegram=True)
+                    if target_display:
+                        log(f"[{filename}] Uploaded & Scheduled for {target_display}: {url}", date_str, telegram=True)
+                    else:
+                        log(f"[{filename}] Uploaded: {url}", date_str, telegram=True)
                     upload_done = True
-                    break
+                    if not upload_all:
+                        break
                 elif already_uploaded:
                     update_job_stage(date_str, story_index, "UPLOADED")
                     log(f"[{filename}] Already uploaded.", date_str)
@@ -364,8 +424,32 @@ def run_pipeline(upload=False):
     finally:
         release_pipeline_lock()
 
-def run_pipeline_upload_specific(index):
-    date_str = get_current_time().strftime("%Y%m%d")
+def run_pipeline_upload_specific(index, target_date=None, publish_at=None):
+    if target_date:
+        date_str = str(target_date).replace("-", "")
+    else:
+        # Check today first; if today has pending video, use today; otherwise check tomorrow
+        today_str = get_current_time().strftime("%Y%m%d")
+        from datetime import timedelta
+        tomorrow_str = (get_current_time() + timedelta(days=1)).strftime("%Y%m%d")
+
+        today_out = os.path.join(PROJECT_ROOT, "output", today_str)
+        today_log = os.path.join(today_out, "uploaded.txt")
+        today_uploaded = []
+        if os.path.exists(today_log):
+            with open(today_log, "r", encoding="utf-8") as f:
+                today_uploaded = f.read().splitlines()
+
+        today_has_pending = os.path.exists(today_out) and any(
+            os.path.exists(os.path.join(today_out, f"final_{c}.mp4")) and not any(f"final_{c}.mp4" in line for line in today_uploaded)
+            for c in [1, 2, 3]
+        )
+        if today_has_pending:
+            date_str = today_str
+        elif os.path.exists(os.path.join(PROJECT_ROOT, "output", tomorrow_str)):
+            date_str = tomorrow_str
+        else:
+            date_str = today_str
     output_dir = os.path.join(PROJECT_ROOT, "output", date_str)
     uploaded_log = os.path.join(output_dir, "uploaded.txt")
     reddit_day_path = os.path.join(REDDIT_DIR, date_str)
@@ -437,8 +521,18 @@ def run_pipeline_upload_specific(index):
         thumbnail_path_jpg if os.path.exists(thumbnail_path_jpg) else None
     )
 
+    target_display = None
+    if publish_at is False:
+        publish_at = None
+    elif publish_at is None:
+        if os.getenv("SCHEDULE_UPLOADS", "true").lower() in ("true", "1", "yes"):
+            publish_at, target_display = get_target_publish_time(index, target_date_str=date_str)
+    elif publish_at:
+        publish_at = parse_schedule_time(publish_at)
+        target_display = publish_at
+
     try:
-        video_url = upload_video(output_path, title, description, tags, thumbnail_path=thumbnail_path)
+        video_url = upload_video(output_path, title, description, tags, thumbnail_path=thumbnail_path, publish_at=publish_at)
     except Exception as ue:
         err_str = str(ue)
         if "YouTube token" in err_str or "re-authenticate" in err_str or "RefreshError" in err_str or "invalid_grant" in err_str:
@@ -449,10 +543,16 @@ def run_pipeline_upload_specific(index):
         raise ue
 
     # ✅ Log and write upload data
+    entry = f"final_{index}.mp4 | {title} | {video_url}"
+    if target_display:
+        entry += f" | Scheduled: {target_display}"
     with open(uploaded_log, "a", encoding="utf-8") as f:
-        f.write(f"final_{index}.mp4 | {title} | {video_url}\n")
+        f.write(entry + "\n")
 
-    log(f"[story_{index}.json] Uploaded: {video_url}", date_str, telegram=True)
+    if target_display:
+        log(f"[story_{index}.json] Uploaded & Scheduled for {target_display}: {video_url}", date_str, telegram=True)
+    else:
+        log(f"[story_{index}.json] Uploaded: {video_url}", date_str, telegram=True)
 
 
 def get_upload_status(date_str=None):
