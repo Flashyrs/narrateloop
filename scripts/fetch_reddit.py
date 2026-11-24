@@ -320,6 +320,86 @@ def parse_reddit_rss_xml(xml_content, default_sub=""):
         print(f"⚠️ RSS XML parse warning: {e}")
     return posts
 
+def get_reddit_oauth_token():
+    client_id = os.getenv("REDDIT_CLIENT_ID")
+    client_secret = os.getenv("REDDIT_SECRET") or os.getenv("REDDIT_CLIENT_SECRET")
+    user_agent = os.getenv("REDDIT_USER_AGENT", "NarrateLoop/1.0")
+    if not client_id or not client_secret:
+        return None
+    try:
+        auth = requests.auth.HTTPBasicAuth(client_id, client_secret)
+        data = {"grant_type": "client_credentials"}
+        headers = {"User-Agent": user_agent}
+        res = requests.post("https://www.reddit.com/api/v1/access_token", auth=auth, data=data, headers=headers, timeout=10)
+        if res.status_code == 200:
+            return res.json().get("access_token")
+    except Exception as e:
+        print(f"⚠️ Reddit OAuth token error: {e}")
+    return None
+
+def fetch_reddit_posts_oauth(subreddits_pool, used_db, max_posts=15):
+    token = get_reddit_oauth_token()
+    if not token:
+        return []
+
+    user_agent = os.getenv("REDDIT_USER_AGENT", "NarrateLoop/1.0")
+    headers = {
+        "Authorization": f"bearer {token}",
+        "User-Agent": user_agent
+    }
+
+    posts_collected = []
+    print(f"🔑 Fetching stories via Official Reddit OAuth API ({len(subreddits_pool)} subreddits)...")
+
+    for sub in subreddits_pool:
+        if len(posts_collected) >= max_posts:
+            break
+        endpoints = [
+            f"https://oauth.reddit.com/r/{sub}/hot?limit=15",
+            f"https://oauth.reddit.com/r/{sub}/top?t=day&limit=15"
+        ]
+        for ep in endpoints:
+            try:
+                res = requests.get(ep, headers=headers, timeout=8)
+                if res.status_code == 200:
+                    data = res.json().get("data", {})
+                    children = data.get("children", [])
+                    for child in children:
+                        d = child.get("data", {})
+                        if d.get("over_18") or d.get("stickied") or d.get("is_video"):
+                            continue
+                        raw_text = d.get("selftext", "").strip()
+                        raw_title = d.get("title", "").strip()
+                        if not raw_text or len(raw_text) < 120:
+                            continue
+                        permalink = f"https://www.reddit.com{d.get('permalink', '')}"
+                        post_id = d.get("id", "")
+                        candidate = {
+                            "id": post_id,
+                            "title": censor(raw_title),
+                            "text": censor(raw_text),
+                            "score": d.get("score", 500),
+                            "subreddit": d.get("subreddit", sub),
+                            "permalink": permalink
+                        }
+                        if not is_post_duplicate(candidate, used_db):
+                            if not any(p.get("permalink") == candidate["permalink"] for p in posts_collected):
+                                posts_collected.append(candidate)
+                        else:
+                            pass
+                elif res.status_code == 401:
+                    print("⚠️ Reddit OAuth token expired.")
+                    return posts_collected
+                elif res.status_code == 429:
+                    print(f"⚠️ Reddit OAuth rate limited on r/{sub}.")
+                    break
+            except Exception as e:
+                print(f"⚠️ Reddit OAuth fetch warning on r/{sub}: {e}")
+            if len(posts_collected) >= max_posts:
+                break
+
+    return posts_collected
+
 def fetch_reddit_posts(target_date=None, replace_story_idx=None):
     posts_collected = []
     used_db = load_used_posts_db()
@@ -356,37 +436,44 @@ def fetch_reddit_posts(target_date=None, replace_story_idx=None):
     if not unused_pool:
         unused_pool = subreddits_pool
 
-    batches = [unused_pool[i:i + 4] for i in range(0, len(unused_pool), 4)]
-    
-    print("📡 Fetching stories via Direct Reddit RSS...")
-    for batch in batches:
-        multi_sub = "+".join(batch)
-        urls = [
-            f"https://www.reddit.com/r/{multi_sub}/top/.rss?t=day",
-            f"https://www.reddit.com/r/{multi_sub}/hot/.rss",
-            f"https://www.reddit.com/r/{multi_sub}/top/.rss?t=week"
-        ]
-        for url in urls:
-            headers = {
-                'User-Agent': random.choice(USER_AGENTS),
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-            }
-            try:
-                res = requests.get(url, headers=headers, timeout=10)
-                if res.status_code == 200 and len(res.text) > 1000:
-                    parsed = parse_reddit_rss_xml(res.text)
-                    for candidate in parsed:
-                        if not is_post_duplicate(candidate, used_db):
-                            # Avoid duplicates within current collection
-                            if not any(p.get("permalink") == candidate["permalink"] for p in posts_collected):
-                                posts_collected.append(candidate)
-                        else:
-                            print(f"🔁 [Deduplication] Skipped already-used post: {candidate['title'][:40]}...")
-            except Exception as e:
-                print(f"⚠️ RSS fetch warning for r/{multi_sub}: {e}")
+    # Method 0: Official Reddit OAuth API (Primary & 100% Reliable, Bypasses Cloud IP Block)
+    oauth_posts = fetch_reddit_posts_oauth(unused_pool, used_db, max_posts=15)
+    for p in oauth_posts:
+        if not any(existing.get("permalink") == p["permalink"] for existing in posts_collected):
+            posts_collected.append(p)
 
-        if len(posts_collected) >= 15:
-            break
+    # Method 1: Direct Reddit Multi-Feed RSS (Fallback if OAuth returns fewer than 15)
+    if len(posts_collected) < 15:
+        batches = [unused_pool[i:i + 4] for i in range(0, len(unused_pool), 4)]
+        print("📡 Fetching stories via Direct Reddit RSS...")
+        for batch in batches:
+            multi_sub = "+".join(batch)
+            urls = [
+                f"https://www.reddit.com/r/{multi_sub}/top/.rss?t=day",
+                f"https://www.reddit.com/r/{multi_sub}/hot/.rss",
+                f"https://www.reddit.com/r/{multi_sub}/top/.rss?t=week"
+            ]
+            for url in urls:
+                headers = {
+                    'User-Agent': random.choice(USER_AGENTS),
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                }
+                try:
+                    res = requests.get(url, headers=headers, timeout=10)
+                    if res.status_code == 200 and len(res.text) > 1000:
+                        parsed = parse_reddit_rss_xml(res.text)
+                        for candidate in parsed:
+                            if not is_post_duplicate(candidate, used_db):
+                                # Avoid duplicates within current collection
+                                if not any(p.get("permalink") == candidate["permalink"] for p in posts_collected):
+                                    posts_collected.append(candidate)
+                            else:
+                                print(f"🔁 [Deduplication] Skipped already-used post: {candidate['title'][:40]}...")
+                except Exception as e:
+                    print(f"⚠️ RSS fetch warning for r/{multi_sub}: {e}")
+
+            if len(posts_collected) >= 15:
+                break
 
     # Method 2: Individual Subreddit RSS Fallback
     if len(posts_collected) < 3:
